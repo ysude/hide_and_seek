@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Hide and Seek - WebGL Core</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+    </style>
+</head>
+<body>
+    <canvas id="glCanvas"></canvas>
+    <div id="ui" style="position: absolute; top: 20px; right: 20px; color: white; font-family: Arial; font-size: 24px; background: rgba(0,0,0,0.5); padding: 10px; border-radius: 5px; pointer-events: none;">
+        Kartlar: 0 / 3
+    </div>
+    <script src="./libs/gl-matrix.js"></script>
+    
+    <script src="main.js" type="module"></script>
+</body>
+</html>

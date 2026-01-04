@@ -1,0 +1,129 @@
+// Pyramid.js
+const mat4 = window.glMatrix.mat4;
+const vec3 = window.glMatrix.vec3;
+
+// Derece -> Radyan çevirici
+function degToRad(d) { return d * Math.PI / 180; }
+
+export default class Pyramid {
+    constructor(gl, position = [0, 0, 0], color = [1.0, 1.0, 0.0, 1.0], scale = [1, 1, 1]) {
+        this.gl = gl;
+        this.position = vec3.fromValues(position[0], position[1], position[2]);
+        this.rotation = vec3.create(); 
+        this.scale = vec3.fromValues(scale[0], scale[1], scale[2]);
+        
+        this.baseColor = color;
+        this.isSelected = false;
+        
+        this.modelMatrix = mat4.create();
+        this.updateModelMatrix();
+
+        if (!Pyramid.VAO) {
+            Pyramid.initBuffers(gl);
+        }
+    }
+
+    updateModelMatrix() {
+        mat4.identity(this.modelMatrix);
+        mat4.translate(this.modelMatrix, this.modelMatrix, this.position);
+        
+        mat4.rotateX(this.modelMatrix, this.modelMatrix, degToRad(this.rotation[0]));
+        mat4.rotateY(this.modelMatrix, this.modelMatrix, degToRad(this.rotation[1]));
+        mat4.rotateZ(this.modelMatrix, this.modelMatrix, degToRad(this.rotation[2]));
+        
+        mat4.scale(this.modelMatrix, this.modelMatrix, this.scale);
+    }
+
+    checkIntersection(rayOrigin, rayDirection) {
+        // Piramit için de basit küre çarpışması kullanalım (Yeterli olur)
+        let oc = vec3.create();
+        vec3.sub(oc, this.position, rayOrigin);
+        let t = vec3.dot(oc, rayDirection);
+        if (t < 0) return false;
+        
+        let closestPoint = vec3.create();
+        vec3.scale(closestPoint, rayDirection, t);
+        vec3.add(closestPoint, closestPoint, rayOrigin);
+        
+        let distance = vec3.dist(this.position, closestPoint);
+        // Piramit aşağıdan geniş olduğu için radius'u biraz cömert tutalım
+        let radius = Math.max(this.scale[0], this.scale[2]) * 0.8;
+        return distance < radius;
+    }
+
+    draw(shaderProgram, viewMatrix, projectionMatrix) {
+        this.updateModelMatrix();
+        const gl = this.gl;
+        shaderProgram.use();
+
+        const pLoc = gl.getUniformLocation(shaderProgram.program, "uProjection");
+        const vLoc = gl.getUniformLocation(shaderProgram.program, "uView");
+        const mLoc = gl.getUniformLocation(shaderProgram.program, "uModel");
+        const cLoc = gl.getUniformLocation(shaderProgram.program, "uColor");
+
+        gl.uniformMatrix4fv(pLoc, false, projectionMatrix);
+        gl.uniformMatrix4fv(vLoc, false, viewMatrix);
+        gl.uniformMatrix4fv(mLoc, false, this.modelMatrix);
+        
+        let drawColor = this.isSelected ? [1.0, 1.0, 1.0, 1.0] : this.baseColor;
+        if (cLoc) gl.uniform4fv(cLoc, drawColor);
+
+        gl.bindVertexArray(Pyramid.VAO);
+        // Piramidin vertex sayısı farklı (18 vertex)
+        gl.drawArrays(gl.TRIANGLES, 0, 18); 
+        gl.bindVertexArray(null);
+    }
+
+    static initBuffers(gl) {
+        // Kare Tabanlı Piramit
+        // Tepe Noktası: (0, 0.5, 0)
+        // Taban: (-0.5, -0.5) ile (0.5, 0.5) arası (Y = -0.5'te)
+        
+        const vertices = new Float32Array([
+            // Ön Yüz (Triangle)
+             0.0,  0.5,  0.0,   -0.5, -0.5,  0.5,    0.5, -0.5,  0.5,
+            // Sağ Yüz
+             0.0,  0.5,  0.0,    0.5, -0.5,  0.5,    0.5, -0.5, -0.5,
+            // Arka Yüz
+             0.0,  0.5,  0.0,    0.5, -0.5, -0.5,   -0.5, -0.5, -0.5,
+            // Sol Yüz
+             0.0,  0.5,  0.0,   -0.5, -0.5, -0.5,   -0.5, -0.5,  0.5,
+            // Taban (2 Triangle = 1 Kare)
+            -0.5, -0.5,  0.5,   -0.5, -0.5, -0.5,    0.5, -0.5, -0.5,
+            -0.5, -0.5,  0.5,    0.5, -0.5, -0.5,    0.5, -0.5,  0.5
+        ]);
+
+        // Normaller (Işık Hesaplaması İçin Kritik)
+        // Yan yüzeylerin normalleri biraz eğimlidir (Yukarı ve Yana bakar)
+        const normals = new Float32Array([
+            // Ön Yüz Normali (Z'ye ve Y'ye bakar)
+            0.0, 0.4472, 0.8944,  0.0, 0.4472, 0.8944,  0.0, 0.4472, 0.8944,
+            // Sağ Yüz
+            0.8944, 0.4472, 0.0,  0.8944, 0.4472, 0.0,  0.8944, 0.4472, 0.0,
+            // Arka Yüz
+            0.0, 0.4472, -0.8944, 0.0, 0.4472, -0.8944, 0.0, 0.4472, -0.8944,
+            // Sol Yüz
+            -0.8944, 0.4472, 0.0, -0.8944, 0.4472, 0.0, -0.8944, 0.4472, 0.0,
+            // Taban (Direkt aşağı bakar)
+            0.0, -1.0, 0.0,       0.0, -1.0, 0.0,       0.0, -1.0, 0.0,
+            0.0, -1.0, 0.0,       0.0, -1.0, 0.0,       0.0, -1.0, 0.0
+        ]);
+
+        Pyramid.VAO = gl.createVertexArray();
+        gl.bindVertexArray(Pyramid.VAO);
+
+        const vbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+        gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+        gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(0);
+
+        const nbo = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, nbo);
+        gl.bufferData(gl.ARRAY_BUFFER, normals, gl.STATIC_DRAW);
+        gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(1);
+
+        gl.bindVertexArray(null);
+    }
+}
