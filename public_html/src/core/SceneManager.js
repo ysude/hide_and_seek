@@ -1,5 +1,4 @@
 // SceneManager.js - İSİMLER, KARTLAR VE KAPI BURADA
-import Cube from './Cube.js';
 
 export default class SceneManager {
     constructor(gl) {
@@ -57,19 +56,14 @@ export default class SceneManager {
     }
 
     // Kartları ve Kapıyı Oluşturur
-    createQuestObjects(objects) {
-        // Kartlar
-        let c1 = new Cube(this.gl, [-5, -0.5, -5], [1, 1, 0, 1], [0.3, 0.05, 0.5]);
-        c1.isCard = true; objects.push(c1);
+    // SceneManager.js (three-friendly): sadece veri döndür
+	createQuestData() {
+		return [
+		{ type: "card", pos: [-5, -0.5, -5], size: [0.3, 0.05, 0.5] },
+		{ type: "card", pos: [ 5, -0.5, -8], size: [0.3, 0.05, 0.5] },
+		{ type: "card", pos: [10, -0.5,  5], size: [0.3, 0.05, 0.5] },
+		{ type: "door", pos: [ 0,  1.5,-15], size: [2.0, 2.5, 0.2] }
+		];
+	}
 
-        let c2 = new Cube(this.gl, [5, -0.5, -8], [0, 1, 1, 1], [0.3, 0.05, 0.5]);
-        c2.isCard = true; objects.push(c2);
-
-        let c3 = new Cube(this.gl, [10, -0.5, 5], [1, 0, 1, 1], [0.3, 0.05, 0.5]);
-        c3.isCard = true; objects.push(c3);
-
-        // Kapı
-        let door = new Cube(this.gl, [0, 1.5, -15], [0.4, 0.2, 0.1, 1], [2, 2.5, 0.2]);
-        door.isDoor = true; objects.push(door);
-    }
 }
