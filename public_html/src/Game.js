@@ -50,7 +50,7 @@ export class Game {
     // ---- Crouch (gameplay, FPS mode) ----
     this.eye = {
       standY: 1.7,
-      crouchY: 1.1,
+      crouchY: 0.5,
       curY: 1.7,
       smooth: 18.0,
       baseY: 0,
