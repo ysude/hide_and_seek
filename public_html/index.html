@@ -131,8 +131,20 @@
       <div class="label">Kartlar:</div>
       <div class="val"><span id="cardsNow">0</span> / <span id="cardsTotal">3</span></div>
     </div>
+    <div class="row" style="margin-top:6px;">
+      <div class="label">Shader:</div>
+      <div class="val">1 = Stealth, 2 = Panic</div>
+    </div>
     <div id="ui" style="display:none;"></div>
   </div>
+  <div id="modeToast"
+     style="position:fixed; left:50%; top:18px; transform:translateX(-50%);
+            padding:10px 14px; border-radius:12px;
+            background:rgba(0,0,0,0.6); color:#fff;
+            font-family:system-ui; font-size:14px;
+            display:none; z-index:9999;">
+  </div>
+
 
   <div id="crosshair"></div>
 
@@ -149,10 +161,13 @@
         <li>WASD: Move</li>
         <li>Mouse: Look</li>
         <li>Shift: Sprint</li>
+        <li>C: Crouch</li>
         <li>E: Interact (Door / Switch / Card)</li>
+        <li>F: Toggle Free Camera Mode (6DOF)</li>
         <li>H: Toggle help</li>
         <li>1: Shader Set A (Stealth/Noir)</li>
         <li>2: Shader Set B (Panic/Detected)</li>
+        <li>FreeCam: Space/Ctrl = Up/Down (Y), Q/Z = Roll, R = Reset roll</li>
       </ul>
     </div>
   </div>

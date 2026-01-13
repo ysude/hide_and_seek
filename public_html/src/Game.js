@@ -4,7 +4,7 @@ import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import SceneManager from "./core/SceneManager.js";
-import { PanicShader, StealthShader } from "./core/PostShaders.js";
+import { loadPostShaders } from "../assets/shaders/PostShaders.js";
 import { Level } from "./entities/Level.js";
 
 export class Game {
@@ -29,19 +29,33 @@ export class Game {
     this.renderPass = new RenderPass(this.scene, this.camera);
     this.composer.addPass(this.renderPass);
 
-    this.postPassA = new ShaderPass(StealthShader);
-    this.postPassA.material.glslVersion = THREE.GLSL3;
-    this.postPassB = new ShaderPass(PanicShader);
-    this.postPassB.material.glslVersion = THREE.GLSL3;
-
-    this.composer.addPass(this.postPassA);
-    this.composer.addPass(this.postPassB);
-
+    this.postPassA = null;
+    this.postPassB = null;
     this.activeShaderSet = "A";
-    this.setPostShader("A");
-    this.updatePostFXUniforms(0);
 
     this.controls = new PointerLockControls(this.camera, document.body);
+
+    // ---- 6DOF Free Camera Mode ----
+    // F toggles. When exiting, restore previous FPS pose.
+    this.freeCam = {
+      enabled: false,
+      rollSpeed: 1.8,      // rad/sec
+      verticalSpeed: 4.0,  // m/sec
+
+      savedPos: new THREE.Vector3(),
+      savedQuat: new THREE.Quaternion(),
+      hasSaved: false,
+    };
+
+    // ---- Crouch (gameplay, FPS mode) ----
+    this.eye = {
+      standY: 1.7,
+      crouchY: 1.1,
+      curY: 1.7,
+      smooth: 18.0,
+      baseY: 0,
+    };
+
     document.body.addEventListener("click", () => this.controls.lock());
 
     this.scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.15));
@@ -53,23 +67,23 @@ export class Game {
     // gameplay
     this.inventoryCards = 0;
     this.totalCards = 3;
-    this.objects = []; // quest objeleri
+    this.objects = [];
     this.keys = new Set();
 
     // ---- SWITCH/LAMP interactive lighting ----
-    this.switchRoots = [];     // raycast hedefleri (switch root objeler)
-    this.lampAnchors = {};     // { id: Object3D (empty) }
-    this.boundLights = {};     // { id: { light, isOn, intensityOn } }
+    this.switchRoots = [];
+    this.lampAnchors = {};
+    this.boundLights = {};
     this.lightDistance = 25;
     this.lightAngle = Math.PI / 4;
 
     // ---- NAMES VIEW (camera fly) ----
-    this.namesAnchor = null; // EMPTY_NAMES object
-    this.namesMode = false;  // currently showing names view?
+    this.namesAnchor = null;
+    this.namesMode = false;
     this.namesFly = {
       active: false,
       t: 0,
-      dur: 1.25,             // seconds
+      dur: 1.25,
       fromPos: new THREE.Vector3(),
       toPos: new THREE.Vector3(),
       fromQuat: new THREE.Quaternion(),
@@ -77,22 +91,24 @@ export class Game {
       savedPos: new THREE.Vector3(),
       savedQuat: new THREE.Quaternion(),
     };
-    // Top-down offset: anchor’ın üstünden bakış
-    this.namesTopDownHeight = 14.0; // ev scale’ine göre gerekirse 20-30 yap
-    this.namesTopDownForward = 0.001; // tam üstte gimbal hissi olmasın diye
+    this.namesTopDownHeight = 14.0;
+    this.namesTopDownForward = 0.001;
 
     // ---- Interact HUD ----
     this.interactMaxDist = 3.0;
     this.interactState = {
       visible: false,
-      type: null,          // "card" | "switch" | "door"
-      id: null,            // "MAIN" / "Door_003" / etc.
-      object: null,        // THREE.Object3D
-      doorEntry: null,     // Level door entry
+      type: null,
+      id: null,
+      object: null,
+      doorEntry: null,
       text: "",
     };
     this._interactPromptEl = document.getElementById("interactPrompt");
     this._interactTextEl = document.getElementById("interactText");
+    this._modeToastEl = document.getElementById("modeToast");
+    this._modeToastTimer = null;
+
 
     // re-use raycaster
     this._ray = new THREE.Raycaster();
@@ -113,20 +129,23 @@ export class Game {
     window.addEventListener("keydown", (e) => {
       this.keys.add(e.code);
 
-      // Help toggle
       if (e.code === "KeyH") {
         const help = document.getElementById("helpOverlay");
         if (help) help.style.display = (help.style.display === "block") ? "none" : "block";
       }
 
+      // 6DOF FreeCam
+      if (e.code === "KeyF") this.toggleFreeCam();
+      if (e.code === "KeyR") this.resetFreeCamRoll(); // only does something when freecam enabled
+
+      // Post FX sets
       if (e.code === "Digit1") this.setPostShader("A");
       if (e.code === "Digit2") this.setPostShader("B");
 
-      // ✅ Names view toggle
-      if (e.code === "KeyN") {
-        this.toggleNamesView();
-      }
+      // Names view
+      if (e.code === "KeyN") this.toggleNamesView();
 
+      // Interact
       if (e.code === "KeyE") this.tryInteract();
     });
 
@@ -144,7 +163,7 @@ export class Game {
     const { spawn } = await this.level.loadHouse("./assets/models/House.glb");
     if (spawn) {
       this.camera.position.copy(spawn);
-      this.camera.position.y += 1.7;
+      this.camera.position.y += this.eye.standY;
     } else {
       this.camera.position.set(3, 2, -6);
     }
@@ -162,6 +181,12 @@ export class Game {
     // Spawn anında duvar içine doğduysan dışarı ittir
     this.resolveCollisions(this.camera.position, 0.05, this.level.getAllColliders());
 
+    await this.initPostFX();
+
+    // crouch reference
+    this.eye.baseY = this.camera.position.y - this.eye.standY;
+    this.eye.curY = this.eye.standY;
+
     // UI ilk güncelle
     this.updateUI();
     this.hideInteractPrompt();
@@ -175,22 +200,26 @@ export class Game {
       console.warn("[NAMES] EMPTY_NAMES not found in GLB.");
       return;
     }
-    if (this.namesFly.active) return; // transition sırasında spam engelle
+    if (this.namesFly.active) return;
 
-    // PointerLock açıkken kamerayı script ile animasyonlamak için unlock daha stabil
+    // Transition sırasında freecam aç/kapatmayı da istemiyoruz
+    // (pose restore vs karışmasın)
+    // FreeCam açıksa kapatıp normal moda al
+    if (this.freeCam.enabled) {
+      this.freeCam.enabled = false;
+      this.camera.rotation.z = 0;
+      this.freeCam.hasSaved = false;
+    }
+
     if (this.controls.isLocked) this.controls.unlock();
 
-    // toggle hedef: names’e git / geri dön
     if (!this.namesMode) {
-      // current -> names top-down
       this.namesFly.savedPos.copy(this.camera.position);
       this.namesFly.savedQuat.copy(this.camera.quaternion);
 
       const anchorWp = this.namesAnchor.getWorldPosition(new THREE.Vector3());
-
       const targetPos = anchorWp.clone().add(new THREE.Vector3(0, this.namesTopDownHeight, 0));
 
-      // anchor’a baksın (tam aşağı). Küçük forward veriyoruz.
       const lookAtTarget = anchorWp.clone().add(new THREE.Vector3(0, 0, this.namesTopDownForward));
       const targetQuat = new THREE.Quaternion().setFromRotationMatrix(
         new THREE.Matrix4().lookAt(targetPos, lookAtTarget, new THREE.Vector3(0, 0, -1))
@@ -199,7 +228,6 @@ export class Game {
       this.beginCameraFly(targetPos, targetQuat);
       this.namesMode = true;
     } else {
-      // names -> saved
       const targetPos = this.namesFly.savedPos.clone();
       const targetQuat = this.namesFly.savedQuat.clone();
 
@@ -224,17 +252,12 @@ export class Game {
 
     this.namesFly.t += dt;
     const u = Math.min(this.namesFly.t / this.namesFly.dur, 1);
-
-    // smoothstep easing
     const s = u * u * (3 - 2 * u);
 
     this.camera.position.lerpVectors(this.namesFly.fromPos, this.namesFly.toPos, s);
     this.camera.quaternion.copy(this.namesFly.fromQuat).slerp(this.namesFly.toQuat, s);
 
-
-    if (u >= 1) {
-      this.namesFly.active = false;
-    }
+    if (u >= 1) this.namesFly.active = false;
   }
 
   // ------------------------------------------------------------
@@ -250,9 +273,7 @@ export class Game {
 
     root.traverse((obj) => {
       const n = obj.name || "";
-      if (n.startsWith("SWITCH_")) {
-        this.switchRoots.push(obj);
-      }
+      if (n.startsWith("SWITCH_")) this.switchRoots.push(obj);
       if (n.startsWith("LAMP_")) {
         const id = n.replace("LAMP_", "");
         this.lampAnchors[id] = obj;
@@ -338,9 +359,7 @@ export class Game {
       const geo = new THREE.BoxGeometry(size.x, size.y, size.z);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.copy(center);
-
       mesh.castShadow = true;
-      mesh.receiveShadow = false;
 
       this.scene.add(mesh);
       this._shadowBlockers.push(mesh);
@@ -348,8 +367,6 @@ export class Game {
 
     console.log("[SHADOW] wall blockers:", this._shadowBlockers.length);
   }
-
-  // ------------------------------------------------------------
 
   resolveCollisions(pos, radius, colliders) {
     let hitAny = false;
@@ -426,6 +443,82 @@ export class Game {
     if (ui) ui.innerText = `Kartlar: ${this.inventoryCards} / ${this.totalCards}`;
   }
 
+  // ------------------------------------------------------------
+  // FreeCam + crouch
+  // ------------------------------------------------------------
+  toggleFreeCam() {
+    // Names fly sırasında aç/kapa yapma
+    if (this.namesFly.active) return;
+
+    // Enter FreeCam: save current FPS pose
+    if (!this.freeCam.enabled) {
+      this.freeCam.savedPos.copy(this.camera.position);
+      this.freeCam.savedQuat.copy(this.camera.quaternion);
+      this.freeCam.hasSaved = true;
+
+      this.freeCam.enabled = true;
+      this.showModeToast("FREE CAMERA: ON (6DOF)");
+      return;
+    }
+
+    // Exit FreeCam: restore pose
+    this.freeCam.enabled = false;
+
+    if (this.freeCam.hasSaved) {
+      this.camera.position.copy(this.freeCam.savedPos);
+      this.camera.quaternion.copy(this.freeCam.savedQuat);
+    }
+
+    // reset roll
+    
+
+    // recompute crouch base from restored pose
+    this.eye.baseY = this.camera.position.y - this.eye.curY;
+
+    this.showModeToast("FREE CAMERA: OFF");
+
+  }
+
+  resetFreeCamRoll() {
+    if (!this.freeCam.enabled) return;
+  
+    // Keep current yaw/pitch, remove roll by rebuilding quaternion from Euler with Z=0
+    const e = new THREE.Euler().setFromQuaternion(this.camera.quaternion, "YXZ");
+    e.z = 0;
+    this.camera.quaternion.setFromEuler(e);
+  }
+  showModeToast(text) {
+    if (!this._modeToastEl) return;
+    this._modeToastEl.textContent = text;
+    this._modeToastEl.style.display = "block";
+  
+    if (this._modeToastTimer) clearTimeout(this._modeToastTimer);
+    this._modeToastTimer = setTimeout(() => {
+      if (this._modeToastEl) this._modeToastEl.style.display = "none";
+    }, 1500);
+  }
+  
+  
+
+  async initPostFX() {
+    try {
+      const shaders = await loadPostShaders();
+
+      this.postPassA = new ShaderPass(shaders.stealth);
+      this.postPassA.material.glslVersion = THREE.GLSL3;
+      this.postPassB = new ShaderPass(shaders.panic);
+      this.postPassB.material.glslVersion = THREE.GLSL3;
+
+      this.composer.addPass(this.postPassA);
+      this.composer.addPass(this.postPassB);
+
+      this.setPostShader(this.activeShaderSet);
+      this.updatePostFXUniforms(this.lastTime || 0);
+    } catch (error) {
+      console.error("[POSTFX] Failed to load shaders:", error);
+    }
+  }
+
   setPostShader(setId) {
     this.activeShaderSet = setId;
     const useA = setId === "A";
@@ -462,6 +555,7 @@ export class Game {
 
     this.update(dt);
     this.updatePostFXUniforms(t);
+
     if (this.composer) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
 
@@ -469,7 +563,7 @@ export class Game {
   }
 
   // ------------------------------------------------------------
-  // INTERACT HUD (what am I looking at?)
+  // INTERACT HUD
   // ------------------------------------------------------------
   hideInteractPrompt() {
     if (this._interactPromptEl) this._interactPromptEl.style.display = "none";
@@ -490,9 +584,7 @@ export class Game {
   }
 
   scanInteractable() {
-    // Transition sırasında etkileşim prompt’u göstermeyelim
     if (this.namesFly.active) return null;
-
     if (!this.controls.isLocked) return null;
 
     this._ray.setFromCamera(this._centerNdc, this.camera);
@@ -593,9 +685,8 @@ export class Game {
   }
 
   // ------------------------------------------------------------
-
   update(dt) {
-    // ✅ Kamera fly varsa input/interaction kapat, sadece animasyonu çalıştır
+    // camera fly active
     if (this.namesFly.active) {
       this.hideInteractPrompt();
       this.updateCameraFly(dt);
@@ -607,6 +698,7 @@ export class Game {
       return;
     }
 
+    // WASD move
     const speed = (this.keys.has("ShiftLeft") ? 8 : 4) * dt;
     const dir = new THREE.Vector3();
 
@@ -618,16 +710,41 @@ export class Game {
     dir.normalize();
     this.controls.moveRight(dir.x * speed);
     this.controls.moveForward(dir.z * speed);
+    // --- collision resolution (FPS mode only) ---
+    if (!this.freeCam.enabled) {
+      // radius'u senin koridor genişliğine göre ayarla: 0.25-0.35 iyi
+      this.resolveCollisions(this.camera.position, 0.28, this.level.getAllColliders());
+    }
 
-    this.resolveCollisions(this.camera.position, 0.35, this.level.getAllColliders());
 
+    // 6DOF vs crouch
+    if (this.freeCam.enabled) {
+      // Y translation
+      const vs = this.freeCam.verticalSpeed * dt;
+      if (this.keys.has("Space")) this.camera.position.y += vs;
+      if (this.keys.has("ControlLeft") || this.keys.has("ControlRight")) this.camera.position.y -= vs;
+
+      // roll rotation (Q / Z)
+      const rs = this.freeCam.rollSpeed * dt;
+      if (this.keys.has("KeyQ")) this.camera.rotateZ(rs);
+      if (this.keys.has("KeyZ")) this.camera.rotateZ(-rs);
+
+    } else {
+      // crouch (C) always available in FPS mode
+      const targetY = this.keys.has("KeyC") ? this.eye.crouchY : this.eye.standY;
+      const a = 1 - Math.exp(-this.eye.smooth * dt);
+      this.eye.curY += (targetY - this.eye.curY) * a;
+      this.camera.position.y = this.eye.baseY + this.eye.curY;
+    }
+
+    // rotate cards
     for (const o of this.objects) {
       if (o.userData.type === "card") o.rotation.y += 2.0 * dt;
     }
 
+    // doors animate
     const OPEN_ANGLE = -Math.PI / 2;
     const SPEED = 2.5;
-
     for (const d of this.level.doors) {
       const target = d.isOpen ? OPEN_ANGLE : 0;
       const diff = target - d.angle;
@@ -637,12 +754,10 @@ export class Game {
     }
 
     this.level.updateDynamicColliders();
-
     this.updateInteractHUD();
   }
 
   tryInteract() {
-    // transition sırasında etkileşim yok
     if (this.namesFly.active) return;
 
     if (this.interactState.visible && this.interactState.type) {
@@ -680,4 +795,3 @@ export class Game {
     if (this.postPassB?.uniforms) this.postPassB.uniforms.uResolution.value.set(innerWidth, innerHeight);
   }
 }
-
