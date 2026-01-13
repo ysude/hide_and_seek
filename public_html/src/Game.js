@@ -43,6 +43,24 @@ export class Game {
     this.lightDistance = 25;
     this.lightAngle = Math.PI / 4;
 
+    // ---- NAMES VIEW (camera fly) ----
+    this.namesAnchor = null; // EMPTY_NAMES object
+    this.namesMode = false;  // currently showing names view?
+    this.namesFly = {
+      active: false,
+      t: 0,
+      dur: 1.25,             // seconds
+      fromPos: new THREE.Vector3(),
+      toPos: new THREE.Vector3(),
+      fromQuat: new THREE.Quaternion(),
+      toQuat: new THREE.Quaternion(),
+      savedPos: new THREE.Vector3(),
+      savedQuat: new THREE.Quaternion(),
+    };
+    // Top-down offset: anchor’ın üstünden bakış
+    this.namesTopDownHeight = 14.0; // ev scale’ine göre gerekirse 20-30 yap
+    this.namesTopDownForward = 0.001; // tam üstte gimbal hissi olmasın diye
+
     // ---- Interact HUD ----
     this.interactMaxDist = 3.0;
     this.interactState = {
@@ -66,6 +84,7 @@ export class Game {
       new THREE.MeshStandardMaterial()
     );
     floor.position.set(0, -1.0, 0);
+    floor.receiveShadow = true;
     this.scene.add(floor);
 
     this.level = new Level(this.scene);
@@ -74,18 +93,24 @@ export class Game {
     window.addEventListener("keydown", (e) => {
       this.keys.add(e.code);
 
-      // Help toggle (opsiyonel)
+      // Help toggle
       if (e.code === "KeyH") {
         const help = document.getElementById("helpOverlay");
         if (help) help.style.display = (help.style.display === "block") ? "none" : "block";
       }
 
+      // ✅ Names view toggle
+      if (e.code === "KeyN") {
+        this.toggleNamesView();
+      }
+
       if (e.code === "KeyE") this.tryInteract();
     });
+
     window.addEventListener("keyup", (e) => this.keys.delete(e.code));
     window.addEventListener("resize", () => this.resize());
 
-    this.debugCollisions = true;
+    this.debugCollisions = false;
     this._lastColLog = 0;
 
     this.lastTime = 0;
@@ -101,11 +126,14 @@ export class Game {
       this.camera.position.set(3, 2, -6);
     }
 
+    // ✅ EMPTY_NAMES anchor’ını bul
+    this.namesAnchor = this.level.root?.getObjectByName("EMPTY_NAMES") ?? null;
+    console.log("[NAMES] anchor:", this.namesAnchor ? "FOUND" : "NOT FOUND");
 
     // ışıkları kur
     this.setupInteractiveLightsFromHouse();
 
-    // ✅ duvar collider’larından shadow blocker üret
+    // duvar collider’larından shadow blocker üret
     this.buildShadowBlockersFromWallColliders();
 
     // Spawn anında duvar içine doğduysan dışarı ittir
@@ -114,6 +142,76 @@ export class Game {
     // UI ilk güncelle
     this.updateUI();
     this.hideInteractPrompt();
+  }
+
+  // ------------------------------------------------------------
+  // NAMES VIEW
+  // ------------------------------------------------------------
+  toggleNamesView() {
+    if (!this.namesAnchor) {
+      console.warn("[NAMES] EMPTY_NAMES not found in GLB.");
+      return;
+    }
+    if (this.namesFly.active) return; // transition sırasında spam engelle
+
+    // PointerLock açıkken kamerayı script ile animasyonlamak için unlock daha stabil
+    if (this.controls.isLocked) this.controls.unlock();
+
+    // toggle hedef: names’e git / geri dön
+    if (!this.namesMode) {
+      // current -> names top-down
+      this.namesFly.savedPos.copy(this.camera.position);
+      this.namesFly.savedQuat.copy(this.camera.quaternion);
+
+      const anchorWp = this.namesAnchor.getWorldPosition(new THREE.Vector3());
+
+      const targetPos = anchorWp.clone().add(new THREE.Vector3(0, this.namesTopDownHeight, 0));
+
+      // anchor’a baksın (tam aşağı). Küçük forward veriyoruz.
+      const lookAtTarget = anchorWp.clone().add(new THREE.Vector3(0, 0, this.namesTopDownForward));
+      const targetQuat = new THREE.Quaternion().setFromRotationMatrix(
+        new THREE.Matrix4().lookAt(targetPos, lookAtTarget, new THREE.Vector3(0, 0, -1))
+      );
+
+      this.beginCameraFly(targetPos, targetQuat);
+      this.namesMode = true;
+    } else {
+      // names -> saved
+      const targetPos = this.namesFly.savedPos.clone();
+      const targetQuat = this.namesFly.savedQuat.clone();
+
+      this.beginCameraFly(targetPos, targetQuat);
+      this.namesMode = false;
+    }
+  }
+
+  beginCameraFly(toPos, toQuat) {
+    this.namesFly.active = true;
+    this.namesFly.t = 0;
+
+    this.namesFly.fromPos.copy(this.camera.position);
+    this.namesFly.fromQuat.copy(this.camera.quaternion);
+
+    this.namesFly.toPos.copy(toPos);
+    this.namesFly.toQuat.copy(toQuat);
+  }
+
+  updateCameraFly(dt) {
+    if (!this.namesFly.active) return;
+
+    this.namesFly.t += dt;
+    const u = Math.min(this.namesFly.t / this.namesFly.dur, 1);
+
+    // smoothstep easing
+    const s = u * u * (3 - 2 * u);
+
+    this.camera.position.lerpVectors(this.namesFly.fromPos, this.namesFly.toPos, s);
+    this.camera.quaternion.copy(this.namesFly.fromQuat).slerp(this.namesFly.toQuat, s);
+
+
+    if (u >= 1) {
+      this.namesFly.active = false;
+    }
   }
 
   // ------------------------------------------------------------
@@ -138,26 +236,26 @@ export class Game {
       }
     });
 
-    // Her LAMP için spotlight oluştur
     for (const id of Object.keys(this.lampAnchors)) {
       const anchor = this.lampAnchors[id];
 
       const light = new THREE.SpotLight(
         0xffffff,
-        0.0,                 // başlangıç kapalı
-        this.lightDistance,  // distance
-        this.lightAngle,     // angle
-        0.35,                // penumbra
-        1.0                  // decay
+        0.0,
+        this.lightDistance,
+        this.lightAngle,
+        0.35,
+        1.0
       );
 
-
-      // Anchor world pos
       const wp = anchor.getWorldPosition(new THREE.Vector3());
       light.position.copy(wp);
-
-      // Target: aşağı
       light.target.position.copy(wp.clone().add(new THREE.Vector3(0, -1, 0)));
+
+      light.castShadow = true;
+      light.shadow.mapSize.set(1024, 1024);
+      light.shadow.bias = -0.0002;
+      light.shadow.normalBias = 0.02;
 
       this.scene.add(light);
       this.scene.add(light.target);
@@ -167,30 +265,14 @@ export class Game {
         isOn: false,
         intensityOn: 8.0,
       };
-
-      light.castShadow = true;
-      light.shadow.mapSize.set(1024, 1024);
-      light.shadow.bias = -0.0002;        // acne olursa bunu değiştiririz
-      light.shadow.normalBias = 0.02;     // shadow acne azaltır
-
-      const helper = new THREE.SpotLightHelper(light);
-this.scene.add(helper);
-
-// update’te her frame helper’ı güncelle
-this._lightHelpers = this._lightHelpers || [];
-this._lightHelpers.push(helper);
-
-
-
     }
 
     console.log(
       "[LIGHTING] switches:",
-      this.switchRoots.map(s => s.name),
+      this.switchRoots.map((s) => s.name),
       "lamps:",
       Object.keys(this.boundLights)
     );
-    
   }
 
   toggleLightBySwitchName(switchName) {
@@ -206,49 +288,43 @@ this._lightHelpers.push(helper);
   }
 
   buildShadowBlockersFromWallColliders() {
-    // Level collider listesi: { name, box } formatında zaten var
     const colliders = this.level.getAllColliders();
-  
-    // Eski blocker’ları temizle (yeniden load vs olursa)
+
     if (this._shadowBlockers) {
       for (const m of this._shadowBlockers) this.scene.remove(m);
     }
     this._shadowBlockers = [];
-  
-    // Görünmez ama gölge atan materyal
-    const mat = new THREE.ShadowMaterial({ opacity: 0.0 }); // 0 => tamamen görünmez
-  
+
+    const mat = new THREE.ShadowMaterial({ opacity: 0.0 });
+
     for (const c of colliders) {
       const n = c.name || "";
-      if (!n.startsWith("COL_WALL")) continue; // ✅ sadece duvar collider’ları
-  
-      const b = c.box; // THREE.Box3
-  
+      if (!n.startsWith("COL_WALL")) continue;
+
+      const b = c.box;
+
       const size = new THREE.Vector3();
       const center = new THREE.Vector3();
       b.getSize(size);
       b.getCenter(center);
-  
-      // Çok ince collider varsa, gölge stabil olsun diye minimum kalınlık ver
+
       size.x = Math.max(size.x, 0.05);
       size.y = Math.max(size.y, 0.05);
       size.z = Math.max(size.z, 0.05);
-  
+
       const geo = new THREE.BoxGeometry(size.x, size.y, size.z);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.copy(center);
-  
-      // Shadow için kritik flag’ler
-      mesh.castShadow = true;     // ✅ ışığı kessin
-      mesh.receiveShadow = false; // gerek yok
-  
+
+      mesh.castShadow = true;
+      mesh.receiveShadow = false;
+
       this.scene.add(mesh);
       this._shadowBlockers.push(mesh);
     }
-  
+
     console.log("[SHADOW] wall blockers:", this._shadowBlockers.length);
   }
-  
 
   // ------------------------------------------------------------
 
@@ -363,14 +439,15 @@ this._lightHelpers.push(helper);
     this.interactState.text = text;
   }
 
-  // Returns {type, object, doorEntry, id, distance}
   scanInteractable() {
-    // Pointer lock yoksa prompt gösterme
+    // Transition sırasında etkileşim prompt’u göstermeyelim
+    if (this.namesFly.active) return null;
+
     if (!this.controls.isLocked) return null;
 
     this._ray.setFromCamera(this._centerNdc, this.camera);
 
-    // 1) Cards (quest objects)
+    // 1) Cards
     const questHits = this._ray.intersectObjects(this.objects, false);
     if (questHits.length) {
       const hit = questHits[0].object;
@@ -441,7 +518,6 @@ this._lightHelpers.push(helper);
       return;
     }
 
-    // Prompt text üret
     if (info.type === "card") {
       this.interactState = { ...this.interactState, ...info };
       this.showInteractPrompt("Pick up card");
@@ -469,6 +545,13 @@ this._lightHelpers.push(helper);
   // ------------------------------------------------------------
 
   update(dt) {
+    // ✅ Kamera fly varsa input/interaction kapat, sadece animasyonu çalıştır
+    if (this.namesFly.active) {
+      this.hideInteractPrompt();
+      this.updateCameraFly(dt);
+      return;
+    }
+
     if (!this.controls.isLocked) {
       this.hideInteractPrompt();
       return;
@@ -486,15 +569,12 @@ this._lightHelpers.push(helper);
     this.controls.moveRight(dir.x * speed);
     this.controls.moveForward(dir.z * speed);
 
-    // collision (static + door dynamic)
     this.resolveCollisions(this.camera.position, 0.35, this.level.getAllColliders());
 
-    // quest obj anim
     for (const o of this.objects) {
       if (o.userData.type === "card") o.rotation.y += 2.0 * dt;
     }
 
-    // DOOR ANIMATION
     const OPEN_ANGLE = -Math.PI / 2;
     const SPEED = 2.5;
 
@@ -508,12 +588,13 @@ this._lightHelpers.push(helper);
 
     this.level.updateDynamicColliders();
 
-    // ✅ her frame “neyi etkileşebilirsin?” UI güncelle
     this.updateInteractHUD();
   }
 
   tryInteract() {
-    // ✅ Önce HUD’nin bulduğu şeyi kullan (en tutarlı davranış)
+    // transition sırasında etkileşim yok
+    if (this.namesFly.active) return;
+
     if (this.interactState.visible && this.interactState.type) {
       if (this.interactState.type === "card") {
         const hit = this.interactState.object;
@@ -538,8 +619,6 @@ this._lightHelpers.push(helper);
         return;
       }
     }
-
-    // fallback: eğer prompt görünmüyorsa eski raycast logic’i çalıştırma (karışmasın)
   }
 
   resize() {
