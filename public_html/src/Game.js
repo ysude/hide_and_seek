@@ -1,6 +1,10 @@
 import * as THREE from "three";
 import { PointerLockControls } from "three/addons/controls/PointerLockControls.js";
+import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 import SceneManager from "./core/SceneManager.js";
+import { PanicShader, StealthShader } from "./core/PostShaders.js";
 import { Level } from "./entities/Level.js";
 
 export class Game {
@@ -20,6 +24,22 @@ export class Game {
 
     this.camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 500);
     this.camera.position.set(0, 2, 10);
+
+    this.composer = new EffectComposer(this.renderer);
+    this.renderPass = new RenderPass(this.scene, this.camera);
+    this.composer.addPass(this.renderPass);
+
+    this.postPassA = new ShaderPass(StealthShader);
+    this.postPassA.material.glslVersion = THREE.GLSL3;
+    this.postPassB = new ShaderPass(PanicShader);
+    this.postPassB.material.glslVersion = THREE.GLSL3;
+
+    this.composer.addPass(this.postPassA);
+    this.composer.addPass(this.postPassB);
+
+    this.activeShaderSet = "A";
+    this.setPostShader("A");
+    this.updatePostFXUniforms(0);
 
     this.controls = new PointerLockControls(this.camera, document.body);
     document.body.addEventListener("click", () => this.controls.lock());
@@ -98,6 +118,9 @@ export class Game {
         const help = document.getElementById("helpOverlay");
         if (help) help.style.display = (help.style.display === "block") ? "none" : "block";
       }
+
+      if (e.code === "Digit1") this.setPostShader("A");
+      if (e.code === "Digit2") this.setPostShader("B");
 
       // ✅ Names view toggle
       if (e.code === "KeyN") {
@@ -403,6 +426,31 @@ export class Game {
     if (ui) ui.innerText = `Kartlar: ${this.inventoryCards} / ${this.totalCards}`;
   }
 
+  setPostShader(setId) {
+    this.activeShaderSet = setId;
+    const useA = setId === "A";
+    if (this.postPassA) {
+      this.postPassA.enabled = useA;
+      this.postPassA.renderToScreen = useA;
+    }
+    if (this.postPassB) {
+      this.postPassB.enabled = !useA;
+      this.postPassB.renderToScreen = !useA;
+    }
+  }
+
+  updatePostFXUniforms(t) {
+    if (this.postPassA?.uniforms) {
+      this.postPassA.uniforms.uTime.value = t;
+      this.postPassA.uniforms.uResolution.value.set(innerWidth, innerHeight);
+    }
+    if (this.postPassB?.uniforms) {
+      this.postPassB.uniforms.uTime.value = t;
+      this.postPassB.uniforms.uResolution.value.set(innerWidth, innerHeight);
+      this.postPassB.uniforms.uPanic.value = 1.0;
+    }
+  }
+
   start() {
     requestAnimationFrame((t) => this.loop(t));
   }
@@ -413,7 +461,9 @@ export class Game {
     this.lastTime = t;
 
     this.update(dt);
-    this.renderer.render(this.scene, this.camera);
+    this.updatePostFXUniforms(t);
+    if (this.composer) this.composer.render();
+    else this.renderer.render(this.scene, this.camera);
 
     requestAnimationFrame((t2) => this.loop(t2));
   }
@@ -625,5 +675,9 @@ export class Game {
     this.renderer.setSize(innerWidth, innerHeight);
     this.camera.aspect = innerWidth / innerHeight;
     this.camera.updateProjectionMatrix();
+    if (this.composer) this.composer.setSize(innerWidth, innerHeight);
+    if (this.postPassA?.uniforms) this.postPassA.uniforms.uResolution.value.set(innerWidth, innerHeight);
+    if (this.postPassB?.uniforms) this.postPassB.uniforms.uResolution.value.set(innerWidth, innerHeight);
   }
 }
+
