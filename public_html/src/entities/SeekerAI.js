@@ -25,8 +25,6 @@ export class SeekerAI {
     this.moveSpeed = 2.0;
     // LOS: low obstacle ignore
     this.lowOccluderMargin = 0.55; 
-    // oyuncu göz hizasından bu kadar aşağıda kalan collider’lar LOS’u kesmesin
-
 
     // collision capsule-ish radius (XZ)
     this.radius = 0.35;
@@ -161,19 +159,15 @@ export class SeekerAI {
   }
 
   updateGroundSector() {
-    // monster position’a koy, zemine yapıştır
     if (!this.debugSector) return;
 
     const y = (this.groundY ?? this.root.position.y) + 0.02;
     this.debugSector.position.set(this.root.position.x, y, this.root.position.z);
 
-    // monster forward yönüne döndür
-    // sector geometry +Z forward varsayıyor
     const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.root.quaternion);
     const yaw = Math.atan2(forward.x, forward.z);
     this.debugSector.rotation.set(0, yaw, 0);
 
-    // seeing -> daha opak
     const m = this.debugSector.material;
     m.opacity = this._seeing ? 0.32 : 0.18;
   }
@@ -185,7 +179,6 @@ export class SeekerAI {
       const b = c.box;
       if (!b) continue;
 
-      // y filtre: monster gövde bandı
       const y = pos.y;
       if (y < b.min.y - 1.5 || y > b.max.y + 1.5) continue;
 
@@ -209,7 +202,6 @@ export class SeekerAI {
   update(dt) {
     if (this.groundY === null) this.groundY = this.root.position.y;
 
-    // shader flicker azalt
     if (this._seeHold > 0) this._seeHold -= dt;
 
     switch (this.state) {
@@ -236,7 +228,6 @@ export class SeekerAI {
       this.patrolIndex = (this.patrolIndex + 1) % this.patrolPoints.length;
       this._patrolTimer = 0;
     } else if (this._patrolTimer > this._patrolTimeout) {
-      // takıldı -> next point
       this.patrolIndex = (this.patrolIndex + 1) % this.patrolPoints.length;
       this._patrolTimer = 0;
       this._detourTarget = null;
@@ -246,7 +237,6 @@ export class SeekerAI {
 
   updateChase(dt) {
     if (this.canSeePlayer()) {
-      // oyuncunun “son görülen” konumu: göz hizası değil, zemine projekte
       this.lastSeenPos.copy(this.playerCamera.position);
       this.lastSeenPos.y = this.groundY;
       this.moveTowards(this.lastSeenPos, dt);
@@ -309,9 +299,6 @@ export class SeekerAI {
   /* -------------------- VISION (crouch-aware LOS) -------------------- */
 
   getPlayerEyeWorld() {
-    // Player crouch’ı Game tarafında C ile yapıyorsun ama AI tarafında bilmiyoruz.
-    // Çözüm: Kamera yüksekliğini ground’a göre çıkarıp “crouch” tahmin et.
-    // Eğer kameraY - groundY küçükse crouch say.
     const cam = this.playerCamera.position;
     const h = cam.y - (this.groundY ?? 0);
     const crouching = h < 1.35; // threshold
@@ -355,35 +342,24 @@ export class SeekerAI {
     this.raycaster.set(eye, toPlayer.clone().normalize());
     const hits = this.raycaster.intersectObjects(this._colMeshes, true);
 
-    // hiç çarpışma yoksa net görüyor
     if (!hits.length) return this._setSeeing(true);
 
-    // “gerçek engel” bul: low collider’ları ignore et
     let blocked = false;
 
-    // oyuncu göz hizası (world)
     const playerEyeY = targetEye.y;
-    const margin = this.lowOccluderMargin ?? 0.35; // güvenli default
+    const margin = this.lowOccluderMargin ?? 0.35; 
 
     for (const h of hits) {
-      // oyuncudan daha uzaktaki hit’ler önemsiz
       if (h.distance >= dist - 0.15) break;
-
-      // hit noktası dünya koordinatı
       const hp = h.point;
-
-      // Eğer hit noktası oyuncu göz hizasından bariz aşağıdaysa (yatak gibi),
-      // bunu LOS engeli sayma.
       if (hp.y < playerEyeY - margin) continue;
-
-      // Buraya geldiyse: “yüksek” bir şey araya girdi (duvar, dolap, vs)
       blocked = true;
       break;
     }
 
     const visible = !blocked;
 
-    // see-hold (shader flicker azalt)
+    // see-hold
     if (visible) {
       this._seeHold = this._seeHoldDur;
       return this._setSeeing(true);
@@ -404,7 +380,7 @@ export class SeekerAI {
 /* -------------------- MOVEMENT -------------------- */
 
   moveTowards(target, dt) {
-    // snap y (zıplama/ledge bug azalt)
+    // snap y
     if (this.snapToGround) {
       const dy = this.root.position.y - (this.groundY ?? this.root.position.y);
       if (Math.abs(dy) > this.maxYStep) this.root.position.y = this.groundY;
@@ -440,12 +416,11 @@ export class SeekerAI {
     // face (yaw only)
     this.root.lookAt(goal.x, this.root.position.y, goal.z);
 
-    // stuck detect - daha hassas ve hızlı
+    // stuck detect 
     const moved = this.root.position.distanceTo(before);
     if (moved < 0.005) this._stuckTime += dt;
     else this._stuckTime = 0;
 
-    // daha hızlı müdahale
     if (this._stuckTime > 0.25) {
       this._stuckTime = 0;
       this.pickDetour(goal, cols);
@@ -458,7 +433,6 @@ export class SeekerAI {
     if (toGoal.lengthSq() < 0.0001) return;
     toGoal.normalize();
 
-    // 8 yön dene (45 derece aralıklarla)
     const angles = [90, -90, 45, -45, 135, -135, 30, -30];
     const candidates = [];
 
@@ -473,12 +447,10 @@ export class SeekerAI {
       const step = 2.0;
       const cand = this.root.position.clone().addScaledVector(dir, step);
       
-      // bu pozisyonu test et
       const score = this.evaluatePosition(cand, goal, cols);
       candidates.push({ pos: cand, score });
     }
 
-    // en iyi skoru bul
     candidates.sort((a, b) => b.score - a.score);
     
     if (candidates[0].score > -100) {
@@ -491,7 +463,6 @@ export class SeekerAI {
   evaluatePosition(pos, goal, cols) {
     let score = 100;
 
-    // collider içinde mi? (çok kötü)
     for (const c of cols) {
       const b = c.box;
       if (!b) continue;
@@ -502,7 +473,6 @@ export class SeekerAI {
       if (inBox) {
         score -= 50;
       } else {
-        // yakınlık cezası
         const closestX = Math.max(b.min.x, Math.min(pos.x, b.max.x));
         const closestZ = Math.max(b.min.z, Math.min(pos.z, b.max.z));
         const dx = pos.x - closestX;
@@ -513,7 +483,6 @@ export class SeekerAI {
       }
     }
 
-    // hedefe yakınlık (iyi)
     const distToGoal = pos.distanceTo(goal);
     score += Math.max(0, 30 - distToGoal * 2);
 
@@ -521,7 +490,6 @@ export class SeekerAI {
   }
 
   reached(target) {
-    // y aynı, sadece xz bak
     const dx = this.root.position.x - target.x;
     const dz = this.root.position.z - target.z;
     return (dx * dx + dz * dz) < (0.45 * 0.45);
@@ -542,7 +510,7 @@ export class SeekerAI {
 
   for (const d of doors) {
     if (!d?.mesh) continue;
-    if (d.isOpen) continue; // zaten açıksa dokunma
+    if (d.isOpen) continue;  
 
     // Door world pos
     const dp = d.mesh.getWorldPosition(this._tmpV1);
@@ -552,7 +520,6 @@ export class SeekerAI {
 
     if (d2 > this.doorOpenDistance * this.doorOpenDistance) continue;
 
-    // "kapının önünde mi?" kontrolü (AI kapıya bakıyorsa aç)
     const toDoor = this._tmpV2.set(dx, 0, dz);
     if (toDoor.lengthSq() < 1e-6) continue;
     toDoor.normalize();

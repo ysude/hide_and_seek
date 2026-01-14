@@ -66,7 +66,6 @@ export class Game {
     // ---------------------------
     this.controls = new PointerLockControls(this.camera, document.body);
     document.body.addEventListener("click", () => {
-      // ✅ names modundayken lock alma (yere düşme bugını keser)
       if (this.gameStarted && !this.gameOver && !this.namesMode && !this.namesFly.active) {
         this.controls.lock();
       }
@@ -107,7 +106,7 @@ export class Game {
     this._ray = new THREE.Raycaster();
     this._centerNdc = new THREE.Vector2(0, 0);
     this._interactAccum = 0;
-    this._interactHz = 15; // saniyede 15 tarama yeter
+    this._interactHz = 15;
 
 
     // ---------------------------
@@ -131,7 +130,7 @@ export class Game {
     this.frontDoorUnlocked = false;
 
     // ---- CATCH ----
-    this.catchRadius = 0.9; // yakalama mesafesi (istersen 1.1)
+    this.catchRadius = 0.7; 
 
 
     // ---------------------------
@@ -226,10 +225,6 @@ export class Game {
     this.scene.add(new THREE.HemisphereLight(0x223344, 0x111122, 0.05));
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.01));
 
-    // small debug ambient if you want:
-    // this.debugAmbient = new THREE.AmbientLight(0xffffff, 0.10);
-    // this.scene.add(this.debugAmbient);
-
     // ---------------------------
     // FLOOR MESH (visual)
     // ---------------------------
@@ -252,10 +247,10 @@ export class Game {
     this.flashConeStep = 0.02;
     this.flashIntensityMin = 1.0;
     this.flashIntensityMax = 12.0;
-    this.flashAxis = "x";         // x | y | z
+    this.flashAxis = "x";         
     this.flashStepPos = 0.05;
-    this.flashStepRot = 0.05;      // pozisyon adımı
-    this.flashPivot = null;   // wrapper
+    this.flashStepRot = 0.05;     
+    this.flashPivot = null;  
 
 
 
@@ -322,8 +317,7 @@ export class Game {
     this.inventoryCount = 0;
     this.inspectPivot = new THREE.Group();
     this.inspectPivot.name = "INSPECT_PIVOT";
-    this.inspectPivot.position.set(0, 0, -this.inspectDistance); // kameranın önü
-    // pivot’u init() içinde camera’ya bağlayacağız
+    this.inspectPivot.position.set(0, 0, -this.inspectDistance);
     this._tmpV3a = new THREE.Vector3();
     this._tmpV3b = new THREE.Vector3();
     this._tmpQ1 = new THREE.Quaternion();
@@ -345,7 +339,6 @@ export class Game {
   updateClockUI() {
   if (!this._clockEl) return;
 
-  // gameTimeSec zaten dt * TIME_SCALE ile artıyor
   const total = Math.floor(this.gameTimeSec);
 
   const hh = Math.floor(total / 3600) % 24;
@@ -365,7 +358,6 @@ export class Game {
     return out;
   }
 
-  // min-distance: aynı noktaya spawn olmasın
   findSpawnPointMinDist(minDist = 0.45, tries = 20) {
     const p = this._spawnScratch;
     for (let k = 0; k < tries; k++) {
@@ -380,7 +372,6 @@ export class Game {
       }
       if (ok) return p.clone();
     }
-    // olmadıysa en son random
     return this.randomPointInSpawnBox(new THREE.Vector3());
   }
 
@@ -448,21 +439,16 @@ export class Game {
   clearActiveCollectibles({ keepInspected = true } = {}) {
   const keep = keepInspected ? this.inspectedObject : null;
 
-  // sahneden kaldır
   for (const obj of this.activeCollectibles) {
     if (!obj) continue;
     if (keep && obj === keep) continue;
 
-    // parent neresi olursa olsun temizle
     if (obj.parent) obj.parent.remove(obj);
     this.scene.remove(obj);
 
-    // material clone’ladıysan dispose iyi olur (memory leak önler)
     if (obj.material && obj.material.dispose) obj.material.dispose();
-    // geo cache kullandığın için geo dispose ETME (shared)
   }
 
-  // listeleri resetle
   this.activeCollectibles = keep ? [keep] : [];
 }
 
@@ -560,10 +546,7 @@ export class Game {
     // interactive lights
     this.setupInteractiveLightsFromHouse();
 
-    // shadow blockers from wall colliders
     this.buildShadowBlockersFromWallColliders();
-
-    // if we spawned inside wall push out
     this.resolveCollisions(this.camera.position, this.player.radius, this.getAllColliders(), true);
 
     // post fx
@@ -577,7 +560,7 @@ export class Game {
   }
 
   bindUIButtons() {
-    if (this._uiBound) return; // ✅ prevent double binding
+    if (this._uiBound) return; //  prevent double binding
     this._uiBound = true;
 
     if (this._startBtnEl) {
@@ -599,7 +582,7 @@ export class Game {
 
 
 showStartOverlay() {
-  // ✅ show start overlay
+  //  show start overlay
   if (this._startOverlayEl) this._startOverlayEl.classList.add("isVisible");
   if (this._gameOverOverlayEl) this._gameOverOverlayEl.classList.remove("isVisible");
 
@@ -612,7 +595,7 @@ showStartOverlay() {
 
 
 startGame() {
-  // ✅ hide overlays
+  //  hide overlays
   if (this._startOverlayEl) this._startOverlayEl.classList.remove("isVisible");
   if (this._gameOverOverlayEl) this._gameOverOverlayEl.classList.remove("isVisible");
 
@@ -640,7 +623,7 @@ startGame() {
   this.updateUI();
   this.updateClockUI?.();
 
-  // ✅ pointer lock must be initiated by user gesture (this click)
+  //  pointer lock must be initiated by user gesture (this click)
   this.controls.lock();
 }
 
@@ -703,12 +686,10 @@ endGame(result) {
       if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
     });
 
-    // ✅ ANIMATION: play first clip (or a named one)
+    //  ANIMATION: play first clip (or a named one)
     if (gltf.animations && gltf.animations.length) {
       this.monsterMixer = new THREE.AnimationMixer(this.monster);
 
-      // İstersen isimle seç:
-      // const clip = THREE.AnimationClip.findByName(gltf.animations, "Walk");
       const clip = gltf.animations[0];
       this.monster.scale.set(1.5, 1.5, 1.5);
 
@@ -757,13 +738,12 @@ endGame(result) {
       Math.random()
     );
 
-    mesh.userData.vy = 0;           // düşey hız
-    mesh.userData.radius = 0.12;    // yaklaşık yarıçap (shape'a göre küçük)
+    mesh.userData.vy = 0;          
+    mesh.userData.radius = 0.12;   
     mesh.userData.isCollectible = true;
 
 
     mesh.position.set(x, 2.0, z);
-    // spawn olur olmaz yere oturt (tek sefer)
     mesh.userData.vy = 0;
     this.snapCollectibleToGround(mesh);
     mesh.userData.groundY = this.sampleGroundY(mesh.position.x, mesh.position.z);
@@ -936,31 +916,27 @@ sampleGroundY(x, z) {
   // ============================================================
 
 adjustFlashlightAxis(dir, isRotation) {
-  // Pivot varsa onu kontrol ederiz, yoksa flashlight’ı
   const obj = this.flashPivot ?? this.flashlight;
   if (!obj) return;
 
   if (!isRotation) {
-    // ✅ TRANSLATION (J/K)
+    //  TRANSLATION (J/K)
     const step = this.flashStepPos * dir;
     if (this.flashAxis === "x") obj.position.x += step;
     if (this.flashAxis === "y") obj.position.y += step;
     if (this.flashAxis === "z") obj.position.z += step;
 
-    // güvenlik clamp: ekrandan kaçmasın
     obj.position.x = THREE.MathUtils.clamp(obj.position.x, -0.6, 0.6);
     obj.position.y = THREE.MathUtils.clamp(obj.position.y, -0.6, 0.3);
     obj.position.z = THREE.MathUtils.clamp(obj.position.z, -1.2, -0.05);
   } else {
-    // ✅ ROTATION (Shift+J/K)
-    // ✅ ROTATION (Shift+J/K): camera-space axis
+    //  ROTATION (Shift+J/K)
+    //  ROTATION (Shift+J/K): camera-space axis
       const step = this.flashStepRot * dir;
 
       // obj: flashPivot (kamera child’ı) daha iyi
       const q = new THREE.Quaternion();
 
-      // Kamera child olduğumuz için "camera-space" axis demek aslında obj'nin LOCAL axis'i
-      // Ama Euler yerine quaternion ile döndürünce axis drift daha az olur.
       if (this.flashAxis === "x") {
         // pitch
         q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), step);
@@ -1010,13 +986,11 @@ adjustFlashlightAxis(dir, isRotation) {
 
     // Interact
     if (e.code === "KeyE") {
-      // inspect moddaysak E ile çık
       if (this.inspectedObject) {
         this.endInspect();
         return;
       }
 
-      // önce collectible'a bakıyor muyuz?
       this._ray.setFromCamera(this._centerNdc, this.camera);
       const hits = this._ray
         .intersectObjects(this.activeCollectibles, false)
@@ -1028,7 +1002,6 @@ adjustFlashlightAxis(dir, isRotation) {
         return;
       }
 
-      // collectible yoksa normal interact (door/switch)
       this.tryInteract();
     }
 
@@ -1041,26 +1014,23 @@ adjustFlashlightAxis(dir, isRotation) {
     if (e.code === "KeyF") this.toggleFreeCam();
     if (e.code === "KeyR") this.resetFreeCamRoll();
 
-    // Flashlight toggle (moved from F -> G to avoid conflict)
+    // Flashlight toggle
     if (e.code === "KeyG") this.toggleFlashlight();
 
     // Jump
     if (e.code === "Space") {
       if (!this.freeCam.enabled) this.jumpQueued = true;
-      // freecam uses Space in update() (up)
     }
 
-    // Flashlight axis select: 3/4/5 => x/y/z
     if (e.code === "Digit3") { this.inspectedObject ? (this.inspectAxis = "x") : (this.flashAxis = "x"); }
     if (e.code === "Digit4") { this.inspectedObject ? (this.inspectAxis = "y") : (this.flashAxis = "y"); }
     if (e.code === "Digit5") { this.inspectedObject ? (this.inspectAxis = "z") : (this.flashAxis = "z"); }
 
 
-    // Flashlight axis move: J/K => -/+ along selected axis
     if (e.code === "KeyJ") {
       if (this.inspectedObject) {
         this.adjustInspect(this.inspectAxis, e.shiftKey ? 0.10 : -0.05, e.shiftKey);
-        return; // <-- flashlight'a dokunma
+        return; // 
       }
       this.adjustFlashlightAxis(-1, e.shiftKey === true);
     }
@@ -1105,12 +1075,10 @@ adjustFlashlightAxis(dir, isRotation) {
   beginInspect(obj) {
     if (!obj) return;
 
-    // zaten inspectteyse çık
     if (this.inspectedObject) this.endInspect();
 
     this.inspectedObject = obj;
 
-    // World transform'u kaydet (geri koymak için)
     obj.updateWorldMatrix(true, false);
     obj.userData.__inspect = {
       pos: obj.getWorldPosition(this._tmpV3a).clone(),
@@ -1119,44 +1087,27 @@ adjustFlashlightAxis(dir, isRotation) {
     };
 
 
-    // Objeyi pivot altına taşı
     this.inspectPivot.add(obj);
-
-    // Pivot zaten kameranın önünde, objeyi merkezle
     obj.position.set(0, 0, 0);
     obj.quaternion.identity();
     obj.scale.copy(obj.userData.__inspect.scale);
-
-    // İstersen biraz daha yakın/uzak:
     this.inspectPivot.position.set(0, 0, -this.inspectDistance);
   }
 
   endInspect() {
     const obj = this.inspectedObject;
     if (!obj) return;
-
-    // ✅ inspectteki SON world transform'u al
     obj.updateWorldMatrix(true, false);
     const wPos = obj.getWorldPosition(new THREE.Vector3());
     const wQuat = obj.getWorldQuaternion(new THREE.Quaternion());
     const wScale = obj.getWorldScale(new THREE.Vector3());
-
-    // pivot'tan çıkar
     this.inspectPivot.remove(obj);
-
-    // ✅ scene'ye koy (spawnArea invisible sorunu yok)
     this.scene.add(obj);
-
-    // ✅ inspectte bıraktığın konumu uygula
     obj.position.copy(wPos);
     obj.quaternion.copy(wQuat);
     obj.scale.copy(wScale);
-
-    // state temizle
     delete obj.userData.__inspect;
     this.inspectedObject = null;
-
-    // ✅ yere düşsün / yere otursun
     obj.userData.groundY = this.sampleGroundY(obj.position.x, obj.position.z);
     obj.userData.vy = 0;
   }
@@ -1178,10 +1129,6 @@ adjustFlashlightAxis(dir, isRotation) {
   collectInspected() {
     const obj = this.inspectedObject;
     if (!obj) return;
-
-    // ✅ önce inspect moddan temiz çık (pivot/parent restore işlerini düzgün yapsın)
-    // ama "collect"te geri dünyaya koyma istemiyoruz.
-    // o yüzden endInspect yerine: pivot'tan çıkar + state temizle
     if (obj.parent === this.inspectPivot) {
       this.inspectPivot.remove(obj);
     } else if (obj.parent === this.camera) {
@@ -1190,16 +1137,9 @@ adjustFlashlightAxis(dir, isRotation) {
       obj.parent.remove(obj);
     }
 
-    // ✅ sahneden tamamen kaldır
     this.scene.remove(obj);
-
-    // ✅ listelerden çıkar
     this.activeCollectibles = this.activeCollectibles.filter(o => o !== obj);
-
-    // ✅ inspect state reset
     this.inspectedObject = null;
-
-    // skor
     this.objectsCollected++;
     this.updateUI();
 
@@ -1267,9 +1207,6 @@ adjustFlashlightAxis(dir, isRotation) {
     }
     if (this.namesFly.active) return;
 
-    // Transition sırasında freecam aç/kapatmayı da istemiyoruz
-    // (pose restore vs karışmasın)
-    // FreeCam açıksa kapatıp normal moda al
     if (this.freeCam.enabled) {
       this.freeCam.enabled = false;
       this.camera.rotation.z = 0;
@@ -1283,7 +1220,7 @@ adjustFlashlightAxis(dir, isRotation) {
       this.namesFly.savedQuat.copy(this.camera.quaternion);
 
       const anchorWp = this.namesAnchor.getWorldPosition(new THREE.Vector3());
-      const LEVEL2_Y = 0.1; // <-- bunu ihtiyacına göre ayarla
+      const LEVEL2_Y = 0.1;
       anchorWp.y = LEVEL2_Y;  
       const targetPos = anchorWp.clone().add(new THREE.Vector3(0, this.namesTopDownHeight, 0));
 
@@ -1484,23 +1421,30 @@ adjustFlashlightAxis(dir, isRotation) {
     const playerHead = pos.y + 0.2;
     const playerFeet = pos.y - this.player.height;
 
-    // Safety floor clamp (prevents falling forever if no floor collider hit)
+    // --- tuning ---
+    const SNAP_DIST = 0.22; 
+    const GROUND_EPS = 0.02;  
+    const CEILING_EPS = 0.45;
+    const CEILING_PUSH = 0.005;
+
+    // Safety floor clamp
     if (pos.y < this.player.height) {
       pos.y = this.player.height;
       this.player.velocity.y = 0;
       this.player.onGround = true;
     }
 
+    let bestGround = -Infinity;
+
     for (const c of colliders) {
       const b = c.box;
+      if (!b) continue;
 
       // quick vertical reject
       if (playerHead < b.min.y || playerFeet > b.max.y) continue;
 
       // ceiling stop (only when moving up)
       if (c.isCeiling && this.player.velocity.y > 0) {
-        const CEILING_EPS = 0.45;
-        const CEILING_PUSH = 0.005;
         if (playerHead >= b.min.y - CEILING_EPS) {
           this.player.velocity.y = 0;
           pos.y = b.min.y - this.player.height - CEILING_PUSH;
@@ -1510,28 +1454,18 @@ adjustFlashlightAxis(dir, isRotation) {
         }
       }
 
-      // ground snap (when falling and feet close to top surface)
-      // require xz within expanded bounds
-      const inXZ =
-        pos.x >= b.min.x - radius && pos.x <= b.max.x + radius &&
-        pos.z >= b.min.z - radius && pos.z <= b.max.z + radius;
+      // collect candidate ground height (XZ overlap)
+      if (!c.isCeiling) {
+        const inXZ =
+          pos.x >= b.min.x - radius && pos.x <= b.max.x + radius &&
+          pos.z >= b.min.z - radius && pos.z <= b.max.z + radius;
 
-      if (
-        inXZ &&
-        !c.isCeiling &&
-        this.player.velocity.y <= 0 &&
-        playerFeet <= b.max.y &&
-        playerFeet >= b.max.y - 0.18
-      ) {
-        pos.y = b.max.y + this.player.height;
-        this.player.onGround = true;
-        this.player.velocity.y = 0;
-        hitAny = true;
-        hitNames.push(c.name ?? "(no-name)");
-        // continue to horizontal push too, just in case
+        if (inXZ) {
+          bestGround = Math.max(bestGround, b.max.y);
+        }
       }
 
-      // horizontal push
+      // horizontal push (XZ cylinder vs AABB)
       const closestX = Math.max(b.min.x, Math.min(pos.x, b.max.x));
       const closestZ = Math.max(b.min.z, Math.min(pos.z, b.max.z));
       const dx = pos.x - closestX;
@@ -1550,15 +1484,40 @@ adjustFlashlightAxis(dir, isRotation) {
       }
     }
 
+    //  SINGLE ground resolve (prevents jitter between multiple surfaces)
+    if (bestGround > -Infinity) {
+      const feet = pos.y - this.player.height;
+
+      if (this.player.velocity.y <= 0 && feet <= bestGround + GROUND_EPS) {
+        if (feet >= bestGround - SNAP_DIST) {
+          pos.y = bestGround + this.player.height;
+          this.player.onGround = true;
+          this.player.velocity.y = 0;
+
+          hitAny = true;
+          hitNames.push("GROUND@" + bestGround.toFixed(3));
+        }
+      }
+    }
+
     if (this.debugCollisions && hitAny) {
       const now = performance.now();
       if (logOnce || now - (this._lastColLog ?? 0) > 200) {
         this._lastColLog = now;
         const uniq = [...new Set(hitNames)];
-        console.log("[COLLISION]", "pos:", pos.x.toFixed(2), pos.y.toFixed(2), pos.z.toFixed(2), "hit:", uniq);
+        console.log(
+          "[COLLISION]",
+          "pos:",
+          pos.x.toFixed(2),
+          pos.y.toFixed(2),
+          pos.z.toFixed(2),
+          "hit:",
+          uniq
+        );
       }
     }
   }
+
 
   // ============================================================
   // INTERACT HUD
@@ -1673,7 +1632,7 @@ adjustFlashlightAxis(dir, isRotation) {
 
       this.interactState = { ...this.interactState, ...info };
 
-      // ✅ no id, no (ON/OFF), just action
+      //  no id, no (ON/OFF), just action
       this.showInteractPrompt(isOn ? "Turn Off the Light" : "Turn On the Light");
       return;
     }
@@ -1681,7 +1640,7 @@ adjustFlashlightAxis(dir, isRotation) {
     if (info.type === "door") {
       this.interactState = { ...this.interactState, ...info };
 
-      // ✅ front door locked message (no door name)
+      //  front door locked message (no door name)
       if (info.id === this.frontDoorName && !this.frontDoorUnlocked) {
         this.showInteractPrompt("Door is locked (Collect 6 objects)");
         return;
@@ -1722,7 +1681,7 @@ adjustFlashlightAxis(dir, isRotation) {
         const doorId = this.interactState.id; // ör: "Door_000"
         if (!d) return;
 
-        // ✅ lock logic for front door
+        //  lock logic for front door
         if (doorId === this.frontDoorName && !this.frontDoorUnlocked) {
           this.showModeToast("Locked: Collect all 6 objects");
           return;
@@ -1732,7 +1691,7 @@ adjustFlashlightAxis(dir, isRotation) {
         d.isOpen = !d.isOpen;
         this.playDoorSound();
 
-        // ✅ win: front door opened
+        //  win: front door opened
         if (doorId === this.frontDoorName && d.isOpen) {
           this.endGame("win");
         }
@@ -2033,9 +1992,7 @@ adjustFlashlightAxis(dir, isRotation) {
   }
 
 
-// obj'nin yaklaşık yarı yüksekliği
 _approxHalfHeight(obj) {
-  // cache’le (performans)
   if (obj.userData._halfH !== undefined) return obj.userData._halfH;
 
   const box = new THREE.Box3().setFromObject(obj);
@@ -2162,14 +2119,8 @@ _approxHalfHeight(obj) {
         return;
       }
       
-
-      // wave büyüdükçe spawn artsın
       this.spawnPerWave = 3 + Math.floor(this.wave / 2);
-
-      // ✅ eski wave collectible’larını kaldır
       this.clearActiveCollectibles({ keepInspected: true });
-
-      // ✅ yeni wave spawn
       this.spawnCollectiblesWave();
     }
 
@@ -2243,8 +2194,8 @@ _approxHalfHeight(obj) {
     }
     if (this.monsterMixer) this.monsterMixer.update(dt);
 
-    // ✅ monster catch -> lose
-    if (this.gameStarted && !this.gameOver && this.monster) {
+    //  monster catch -> lose
+    if (this.gameStarted && !this.gameOver && this.monster && !this.freeCam.enabled) {
       const mp = this.monster.getWorldPosition(new THREE.Vector3());
       const pp = this.camera.position;
 
