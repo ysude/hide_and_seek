@@ -41,6 +41,19 @@ export class Level {
     });
 
     this.scene.add(this.root);
+        this.scene.traverse((obj) => {
+    if (!obj.isMesh) return;
+
+    // Spawn area ve helper meshler görünmez
+    if (
+      obj.name === "AREA_SPAWN" ||
+      obj.name.startsWith("AREA_")
+    ) {
+      obj.visible = false;
+      obj.castShadow = false;
+      obj.receiveShadow = false;
+    }
+    });
 
     // Anchors cache (AI + names + spawn)
     this.anchors.length = 0;
@@ -61,6 +74,8 @@ export class Level {
         this.anchors.push(o);
       }
     });
+
+
 
     console.log("[LEVEL] anchors:", this.anchors.map(a => a.name));
 
@@ -117,9 +132,6 @@ export class Level {
 
       const name = (obj.name || "");
       if (!name.startsWith("COL_")) return;
-
-      // Floor'ı istemiyorsan ignore
-      if (name === "COL_FLOOR") return;
 
       // Kapı collider'ları hareket eder -> dynamic
       if (name.startsWith("COL_DOOR")) {

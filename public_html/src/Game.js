@@ -23,6 +23,10 @@ export class Game {
     this.renderer.toneMappingExposure = 1.0;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // perf: high-dpi öldürür
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+    // istersen 1.0 yapıp uçurursun
+
 
     // ---------------------------
     // SCENE / CAMERA
@@ -72,6 +76,9 @@ export class Game {
     // ---------------------------
     this._ray = new THREE.Raycaster();
     this._centerNdc = new THREE.Vector2(0, 0);
+    this._interactAccum = 0;
+    this._interactHz = 15; // saniyede 15 tarama yeter
+
 
     // ---------------------------
     // GAMEPLAY STATE
@@ -158,6 +165,10 @@ export class Game {
     // LEVEL
     // ---------------------------
     this.level = new Level(this.scene);
+
+    this._allCollidersCache = [];
+    this._allCollidersDirty = true;
+
 
     // extra static colliders (floor/ceiling like 2nd code)
     this.levelStaticColliders = [];
@@ -254,6 +265,21 @@ export class Game {
     this.buildQuest();
     this.updateUI();
     this.hideInteractPrompt();
+    this.spawnArea = null;
+    this.spawnBox = new THREE.Box3();
+    this.activeCollectibles = [];
+    this.inspectedObject = null;
+    this.inspectAxis = "x";
+    this.inspectDistance = 1.2;
+    this.inventoryCount = 0;
+    this.inspectPivot = new THREE.Group();
+    this.inspectPivot.name = "INSPECT_PIVOT";
+    this.inspectPivot.position.set(0, 0, -this.inspectDistance); // kameranın önü
+    // pivot’u init() içinde camera’ya bağlayacağız
+    this._tmpV3a = new THREE.Vector3();
+    this._tmpV3b = new THREE.Vector3();
+    this._tmpQ1 = new THREE.Quaternion();
+
 
     // start init
     this.lastTime = 0;
@@ -267,6 +293,7 @@ export class Game {
     // attach listener correctly
     this.scene.add(this.camera);
     this.camera.add(this.listener);
+    this.camera.add(this.inspectPivot);
 
     // load audio (best-effort)
     this.loadAudioSafe("./assets/audio/flashlight_switch.mp3", (buf) => {
@@ -343,6 +370,10 @@ export class Game {
       this.camera.position.set(3, 2, -6);
     }
 
+    this.setupSpawnArea();
+    this.spawnCollectibles(3);
+
+
     // names anchor
     this.namesAnchor = this.level.root?.getObjectByName("EMPTY_NAMES") ?? null;
 
@@ -362,6 +393,19 @@ export class Game {
     this.updateUI();
     this.hideInteractPrompt();
   }
+  setupSpawnArea() {
+  this.spawnArea = this.scene.getObjectByName("AREA_SPAWN");
+  if (!this.spawnArea) {
+    console.warn("AREA_SPAWN not found");
+    return;
+  }
+
+  // extra safety
+  this.spawnArea.visible = false;
+
+  this.spawnBox.setFromObject(this.spawnArea);
+}
+
 
   loadAudioSafe(url, onBuffer) {
     try {
@@ -409,6 +453,86 @@ export class Game {
     console.log("[MONSTER] loaded");
     return this.monster;
   }
+  spawnCollectibles(count = 3) {
+  if (!this.spawnArea) return;
+
+  const geometries = [
+    new THREE.BoxGeometry(0.2, 0.2, 0.02),
+    new THREE.SphereGeometry(0.12, 24, 16),
+    new THREE.TetrahedronGeometry(0.15)
+  ];
+
+  for (let i = 0; i < count; i++) {
+    const geo = geometries[i % geometries.length];
+
+    const mat = new THREE.MeshStandardMaterial({
+      color: new THREE.Color().setHSL(Math.random(), 0.8, 0.6),
+      roughness: 0.4,
+      metalness: 0.1
+    });
+
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = "COLLECTIBLE";
+
+    // random spawn XZ
+    const x = THREE.MathUtils.lerp(
+      this.spawnBox.min.x,
+      this.spawnBox.max.x,
+      Math.random()
+    );
+    const z = THREE.MathUtils.lerp(
+      this.spawnBox.min.z,
+      this.spawnBox.max.z,
+      Math.random()
+    );
+
+    mesh.userData.vy = 0;           // düşey hız
+    mesh.userData.radius = 0.12;    // yaklaşık yarıçap (shape'a göre küçük)
+    mesh.userData.isCollectible = true;
+
+
+    mesh.position.set(x, 2.0, z);
+    // spawn olur olmaz yere oturt (tek sefer)
+    mesh.userData.vy = 0;
+    this.snapCollectibleToGround(mesh);
+    mesh.userData.groundY = this.sampleGroundY(mesh.position.x, mesh.position.z);
+
+
+
+    this.scene.add(mesh);
+    this.activeCollectibles.push(mesh);
+  }
+}
+snapCollectibleToGround(obj) {
+  const colliders = this.getAllColliders();
+  const x = obj.position.x, z = obj.position.z;
+
+  let bestTop = -Infinity;
+  for (const c of colliders) {
+    const b = c.box;
+    if (!b || c.isCeiling) continue;
+    if (x < b.min.x || x > b.max.x) continue;
+    if (z < b.min.z || z > b.max.z) continue;
+    bestTop = Math.max(bestTop, b.max.y);
+  }
+
+  if (bestTop > -Infinity) {
+    const halfH = this._approxHalfHeight(obj);
+    obj.position.y = bestTop + halfH + 0.002;
+  }
+}
+sampleGroundY(x, z) {
+  const colliders = this.getAllColliders();
+  let bestTop = -Infinity;
+  for (const c of colliders) {
+    const b = c.box;
+    if (!b || c.isCeiling) continue;
+    if (x < b.min.x || x > b.max.x) continue;
+    if (z < b.min.z || z > b.max.z) continue;
+    if (b.max.y > bestTop) bestTop = b.max.y;
+  }
+  return bestTop;
+}
 
 
 
@@ -433,8 +557,8 @@ export class Game {
     this.levelStaticColliders.push({
       name: "COL_FLOOR_MAIN",
       box: new THREE.Box3(
-        new THREE.Vector3(-100, -1.0, -100),
-        new THREE.Vector3(100, -0.9, 100)
+        new THREE.Vector3(-100, -0.25, -100),
+        new THREE.Vector3(100, -0.15, 100)
       ),
     });
 
@@ -448,11 +572,20 @@ export class Game {
         new THREE.Vector3(120, CEILING_Y + 1.0, 120)
       ),
     });
+    this._allCollidersDirty = true;
+
   }
 
   getAllColliders() {
-    return [...this.level.getAllColliders(), ...this.levelStaticColliders];
+  if (this._allCollidersDirty) {
+    this._allCollidersCache.length = 0;
+    this._allCollidersCache.push(...this.level.getAllColliders());
+    this._allCollidersCache.push(...this.levelStaticColliders);
+    this._allCollidersDirty = false;
   }
+  return this._allCollidersCache;
+}
+
 
   // ============================================================
   // POST FX
@@ -586,9 +719,6 @@ adjustFlashlightAxis(dir, isRotation) {
     obj.rotation.z.toFixed(2)
   );
 }
-
-
-
   onKeyDown(e) {
     this.keys.add(e.code);
 
@@ -605,7 +735,33 @@ adjustFlashlightAxis(dir, isRotation) {
     if (e.code === "KeyN") this.toggleNamesView();
 
     // Interact
-    if (e.code === "KeyE") this.tryInteract();
+    if (e.code === "KeyE") {
+      // inspect moddaysak E ile çık
+      if (this.inspectedObject) {
+        this.endInspect();
+        return;
+      }
+
+      // önce collectible'a bakıyor muyuz?
+      this._ray.setFromCamera(this._centerNdc, this.camera);
+      const hits = this._ray
+        .intersectObjects(this.activeCollectibles, false)
+        .filter(h => h.object !== this.inspectedObject);
+
+
+      if (hits.length) {
+        this.beginInspect(hits[0].object);
+        return;
+      }
+
+      // collectible yoksa normal interact (door/switch)
+      this.tryInteract();
+    }
+
+
+    if (e.code === "KeyP" && this.inspectedObject) {
+      this.collectInspected();
+    }
 
     // FreeCam toggle
     if (e.code === "KeyF") this.toggleFreeCam();
@@ -621,13 +777,27 @@ adjustFlashlightAxis(dir, isRotation) {
     }
 
     // Flashlight axis select: 3/4/5 => x/y/z
-    if (e.code === "Digit3") this.flashAxis = "x";
-    if (e.code === "Digit4") this.flashAxis = "y";
-    if (e.code === "Digit5") this.flashAxis = "z";
+    if (e.code === "Digit3") { this.inspectedObject ? (this.inspectAxis = "x") : (this.flashAxis = "x"); }
+    if (e.code === "Digit4") { this.inspectedObject ? (this.inspectAxis = "y") : (this.flashAxis = "y"); }
+    if (e.code === "Digit5") { this.inspectedObject ? (this.inspectAxis = "z") : (this.flashAxis = "z"); }
+
 
     // Flashlight axis move: J/K => -/+ along selected axis
-    if (e.code === "KeyJ") this.adjustFlashlightAxis(-1, e.shiftKey === true);
-    if (e.code === "KeyK") this.adjustFlashlightAxis(+1, e.shiftKey === true);
+    if (e.code === "KeyJ") {
+      if (this.inspectedObject) {
+        this.adjustInspect(this.inspectAxis, e.shiftKey ? 0.10 : -0.05, e.shiftKey);
+        return; // <-- flashlight'a dokunma
+      }
+      this.adjustFlashlightAxis(-1, e.shiftKey === true);
+    }
+
+    if (e.code === "KeyK") {
+      if (this.inspectedObject) {
+        this.adjustInspect(this.inspectAxis, e.shiftKey ? -0.10 : 0.05, e.shiftKey);
+        return;
+      }
+      this.adjustFlashlightAxis(+1, e.shiftKey === true);
+    }
 
 
   }
@@ -657,6 +827,115 @@ adjustFlashlightAxis(dir, isRotation) {
       t
     );
   }
+
+  beginInspect(obj) {
+    if (!obj) return;
+
+    // zaten inspectteyse çık
+    if (this.inspectedObject) this.endInspect();
+
+    this.inspectedObject = obj;
+
+    // World transform'u kaydet (geri koymak için)
+    obj.updateWorldMatrix(true, false);
+    obj.userData.__inspect = {
+      pos: obj.getWorldPosition(this._tmpV3a).clone(),
+      quat: obj.getWorldQuaternion(this._tmpQ1).clone(),
+      scale: obj.getWorldScale(this._tmpV3b).clone(),
+    };
+
+
+    // Objeyi pivot altına taşı
+    this.inspectPivot.add(obj);
+
+    // Pivot zaten kameranın önünde, objeyi merkezle
+    obj.position.set(0, 0, 0);
+    obj.quaternion.identity();
+    obj.scale.copy(obj.userData.__inspect.scale);
+
+    // İstersen biraz daha yakın/uzak:
+    this.inspectPivot.position.set(0, 0, -this.inspectDistance);
+  }
+
+  endInspect() {
+    const obj = this.inspectedObject;
+    if (!obj) return;
+
+    // ✅ inspectteki SON world transform'u al
+    obj.updateWorldMatrix(true, false);
+    const wPos = obj.getWorldPosition(new THREE.Vector3());
+    const wQuat = obj.getWorldQuaternion(new THREE.Quaternion());
+    const wScale = obj.getWorldScale(new THREE.Vector3());
+
+    // pivot'tan çıkar
+    this.inspectPivot.remove(obj);
+
+    // ✅ scene'ye koy (spawnArea invisible sorunu yok)
+    this.scene.add(obj);
+
+    // ✅ inspectte bıraktığın konumu uygula
+    obj.position.copy(wPos);
+    obj.quaternion.copy(wQuat);
+    obj.scale.copy(wScale);
+
+    // state temizle
+    delete obj.userData.__inspect;
+    this.inspectedObject = null;
+
+    // ✅ yere düşsün / yere otursun
+    obj.userData.groundY = this.sampleGroundY(obj.position.x, obj.position.z);
+    obj.userData.vy = 0;
+  }
+
+
+
+
+
+  adjustInspect(axis, amount, rotate = false) {
+    if (!this.inspectedObject) return;
+
+    if (rotate) {
+      this.inspectedObject.rotation[axis] += amount;
+    } else {
+      this.inspectedObject.position[axis] += amount;
+    }
+  }
+
+  collectInspected() {
+    const obj = this.inspectedObject;
+    if (!obj) return;
+
+    // ✅ önce inspect moddan temiz çık (pivot/parent restore işlerini düzgün yapsın)
+    // ama "collect"te geri dünyaya koyma istemiyoruz.
+    // o yüzden endInspect yerine: pivot'tan çıkar + state temizle
+    if (obj.parent === this.inspectPivot) {
+      this.inspectPivot.remove(obj);
+    } else if (obj.parent === this.camera) {
+      this.camera.remove(obj);
+    } else if (obj.parent) {
+      obj.parent.remove(obj);
+    }
+
+    // ✅ sahneden tamamen kaldır
+    this.scene.remove(obj);
+
+    // ✅ listelerden çıkar
+    this.activeCollectibles = this.activeCollectibles.filter(o => o !== obj);
+
+    // ✅ inspect state reset
+    this.inspectedObject = null;
+
+    // skor
+    this.inventoryCount++;
+    this.inventoryCards++;
+    this.updateUI();
+
+    console.log("Collected:", this.inventoryCount);
+  }
+
+
+
+
 
   // ============================================================
   // UI
@@ -1228,7 +1507,7 @@ adjustFlashlightAxis(dir, isRotation) {
     // Spot light
     this.flashlightLight = new THREE.SpotLight(0xffffff, 6.0, 30, Math.PI / 9, 0.35, 1.0);
     this.flashlightLight.castShadow = true;
-    this.flashlightLight.shadow.mapSize.set(2048, 2048);
+    this.flashlightLight.shadow.mapSize.set(1024, 1024);
     this.flashlightLight.shadow.bias = -0.0001;
     this.flashlightLight.shadow.normalBias = 0.02;
 
@@ -1397,6 +1676,50 @@ adjustFlashlightAxis(dir, isRotation) {
     door.isOpen = false;
     this.playDoorSound();
   }
+
+  updateCollectiblesPhysics(dt) {
+    if (!this.activeCollectibles.length) return;
+
+    const GRAV = 25.0;
+    const MAX_FALL = -30.0;
+    const inspected = this.inspectedObject;
+
+    for (const obj of this.activeCollectibles) {
+      if (!obj || obj === inspected) continue;
+      if (obj.parent !== this.scene) continue;
+
+      let vy = obj.userData.vy ?? 0;
+      vy = Math.max(vy - GRAV * dt, MAX_FALL);
+      obj.position.y += vy * dt;
+
+      const groundY = obj.userData.groundY;
+      if (groundY !== -Infinity) {
+        const halfH = obj.userData._halfH ?? this._approxHalfHeight(obj);
+        const targetY = groundY + halfH + 0.002;
+        if (obj.position.y <= targetY) {
+          obj.position.y = targetY;
+          vy = 0;
+        }
+      }
+
+      obj.userData.vy = vy;
+    }
+  }
+
+
+// obj'nin yaklaşık yarı yüksekliği
+_approxHalfHeight(obj) {
+  // cache’le (performans)
+  if (obj.userData._halfH !== undefined) return obj.userData._halfH;
+
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+
+  obj.userData._halfH = Math.max(0.02, size.y * 0.5);
+  return obj.userData._halfH;
+}
+
 
   updateFlashlightFailure(dt) {
     if (!this.flashlightLight || !this.flashlightOn) return;
@@ -1570,11 +1893,18 @@ adjustFlashlightAxis(dir, isRotation) {
     this.updateDoors(dt);
 
     // interact
-    this.updateInteractHUD();
+    this._interactAccum += dt;
+    if (this._interactAccum >= 1 / this._interactHz) {
+      this._interactAccum = 0;
+      this.updateInteractHUD();
+    }
+
 
     if (this.seekerAI) {
       this.seekerAI.update(dt);
     }
+    this.updateCollectiblesPhysics(dt);
+
   }
 
   // ============================================================
