@@ -3,6 +3,7 @@ import { PointerLockControls } from "three/addons/controls/PointerLockControls.j
 import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
 import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
+import { SeekerAI } from "./entities/SeekerAI.js";
 
 import SceneManager from "./core/SceneManager.js";
 import { loadPostShaders } from "../assets/shaders/PostShaders.js";
@@ -310,6 +311,23 @@ export class Game {
 
     // load house
     const { spawn } = await this.level.loadHouse("./assets/models/House.glb");
+    const monsterRoot = await this.loadMonster();
+    this.seekerAI = new SeekerAI(
+      this.scene,
+      this.level,
+      this.camera,
+      monsterRoot,
+      () => this.getAllColliders(),
+      {
+        onSeePlayer: (seeing) => {
+          this.setPostShader(seeing ? "B" : "A");
+        },
+      }
+    );
+
+    this.seekerAI.setWaypointsFromAnchors(this.level.anchors);
+    this.resolveCollisions(this.monster.position, 0.45, this.getAllColliders(), true);
+
 
     // build floor mesh + static colliders (floor & ceiling)
     this.buildFloorAndCeiling();
@@ -357,6 +375,42 @@ export class Game {
       console.warn("[AUDIO] load error:", url, e);
     }
   }
+  async loadMonster() {
+    const { loadGLB } = await import("./core/GLTFLoader.js");
+    const gltf = await loadGLB("./assets/models/monster.glb");
+
+    this.monster = gltf.scene;
+    this.scene.add(this.monster);
+
+    // scale / shadow
+    this.monster.scale.set(1, 1, 1);
+    this.monster.traverse((o) => {
+      if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; }
+    });
+
+    // ✅ ANIMATION: play first clip (or a named one)
+    if (gltf.animations && gltf.animations.length) {
+      this.monsterMixer = new THREE.AnimationMixer(this.monster);
+
+      // İstersen isimle seç:
+      // const clip = THREE.AnimationClip.findByName(gltf.animations, "Walk");
+      const clip = gltf.animations[0];
+      this.monster.scale.set(1.5, 1.5, 1.5);
+
+      this.monsterAction = this.monsterMixer.clipAction(clip);
+      this.monsterAction.reset().play();
+
+      console.log("[MONSTER] anim clips:", gltf.animations.map(a => a.name));
+      console.log("[MONSTER] playing:", clip.name || "(unnamed)");
+    } else {
+      console.warn("[MONSTER] no animations in glb");
+    }
+
+    console.log("[MONSTER] loaded");
+    return this.monster;
+  }
+
+
 
   // ============================================================
   // FLOOR + CEILING (static colliders)
@@ -1503,6 +1557,7 @@ adjustFlashlightAxis(dir, isRotation) {
         this.jumpQueued = false;
       }
     }
+    if (this.monsterMixer) this.monsterMixer.update(dt);
 
     // -----------------------------------------
     // rotate quest cards
@@ -1516,6 +1571,10 @@ adjustFlashlightAxis(dir, isRotation) {
 
     // interact
     this.updateInteractHUD();
+
+    if (this.seekerAI) {
+      this.seekerAI.update(dt);
+    }
   }
 
   // ============================================================

@@ -15,6 +15,10 @@ export class Level {
 
     // Doors: [{ mesh, isOpen, angle }]
     this.doors = [];
+
+    // constructor içinde:
+    this.anchors = [];
+
   }
 
   async loadHouse(path = "./assets/models/House.glb") {
@@ -38,6 +42,28 @@ export class Level {
 
     this.scene.add(this.root);
 
+    // Anchors cache (AI + names + spawn)
+    this.anchors.length = 0;
+    this.root.updateWorldMatrix(true, true);
+
+    this.root.traverse((o) => {
+      const n = (o.name || "");
+      // Blender EMPTY: isObject3D true, isMesh false olur genelde
+      if (!n) return;
+
+      if (
+        n === "SPAWN" ||
+        n === "EMPTY_NAMES" ||
+        n.startsWith("AI_SPAWN") ||      // AI_SPAWN.001 vs yakalar
+        n.startsWith("AI_PATROL") ||     // AI_PATROL_00.003 vs yakalar
+        n.startsWith("AI_GUARD")
+      ) {
+        this.anchors.push(o);
+      }
+    });
+
+    console.log("[LEVEL] anchors:", this.anchors.map(a => a.name));
+
     // Collider + Door cache
     this.buildCollidersFromCOL();
     this.cacheDoors();
@@ -48,6 +74,8 @@ export class Level {
       return { spawn: spawnObj.getWorldPosition(new THREE.Vector3()) };
     }
     return { spawn: null };
+    
+
   }
 
   cacheDoors() {
