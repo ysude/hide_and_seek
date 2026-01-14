@@ -21,19 +21,19 @@ export class Monster {
 
     async init() {
         try {
-            // 1. Load Shaders
+            // Load Shaders
             const vShaderSrc = await fetch('./assets/shaders/monster.vert').then(r => r.text());
             const fShaderSrc = await fetch('./assets/shaders/monster.frag').then(r => r.text());
             this.shader = new ShaderProgram(this.gl, vShaderSrc, fShaderSrc);
 
-            // 2. Load Model (Using the smart loader)
+            // Load Model (Using the smart loader)
             const loader = new GLTFLoader(this.gl);
             const meshData = await loader.load('./assets/models/monster.glb');
             
-            // 3. Load Texture
+            // Load Texture
             await this.loadTexture('./assets/textures/monster_diffuse.png');
 
-            // 4. Setup Buffers
+            // Setup Buffers
             this.setupBuffers(meshData);
             this.loaded = true;
             console.log("Monster initialized successfully!");

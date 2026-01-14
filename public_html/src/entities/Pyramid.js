@@ -2,7 +2,6 @@
 const mat4 = window.glMatrix.mat4;
 const vec3 = window.glMatrix.vec3;
 
-// Derece -> Radyan çevirici
 function degToRad(d) { return d * Math.PI / 180; }
 
 export default class Pyramid {
@@ -35,7 +34,6 @@ export default class Pyramid {
     }
 
     checkIntersection(rayOrigin, rayDirection) {
-        // Piramit için de basit küre çarpışması kullanalım (Yeterli olur)
         let oc = vec3.create();
         vec3.sub(oc, this.position, rayOrigin);
         let t = vec3.dot(oc, rayDirection);
@@ -46,7 +44,6 @@ export default class Pyramid {
         vec3.add(closestPoint, closestPoint, rayOrigin);
         
         let distance = vec3.dist(this.position, closestPoint);
-        // Piramit aşağıdan geniş olduğu için radius'u biraz cömert tutalım
         let radius = Math.max(this.scale[0], this.scale[2]) * 0.8;
         return distance < radius;
     }
@@ -69,42 +66,27 @@ export default class Pyramid {
         if (cLoc) gl.uniform4fv(cLoc, drawColor);
 
         gl.bindVertexArray(Pyramid.VAO);
-        // Piramidin vertex sayısı farklı (18 vertex)
         gl.drawArrays(gl.TRIANGLES, 0, 18); 
         gl.bindVertexArray(null);
     }
 
     static initBuffers(gl) {
-        // Kare Tabanlı Piramit
-        // Tepe Noktası: (0, 0.5, 0)
-        // Taban: (-0.5, -0.5) ile (0.5, 0.5) arası (Y = -0.5'te)
+
         
         const vertices = new Float32Array([
-            // Ön Yüz (Triangle)
              0.0,  0.5,  0.0,   -0.5, -0.5,  0.5,    0.5, -0.5,  0.5,
-            // Sağ Yüz
              0.0,  0.5,  0.0,    0.5, -0.5,  0.5,    0.5, -0.5, -0.5,
-            // Arka Yüz
              0.0,  0.5,  0.0,    0.5, -0.5, -0.5,   -0.5, -0.5, -0.5,
-            // Sol Yüz
              0.0,  0.5,  0.0,   -0.5, -0.5, -0.5,   -0.5, -0.5,  0.5,
-            // Taban (2 Triangle = 1 Kare)
             -0.5, -0.5,  0.5,   -0.5, -0.5, -0.5,    0.5, -0.5, -0.5,
             -0.5, -0.5,  0.5,    0.5, -0.5, -0.5,    0.5, -0.5,  0.5
         ]);
 
-        // Normaller (Işık Hesaplaması İçin Kritik)
-        // Yan yüzeylerin normalleri biraz eğimlidir (Yukarı ve Yana bakar)
         const normals = new Float32Array([
-            // Ön Yüz Normali (Z'ye ve Y'ye bakar)
             0.0, 0.4472, 0.8944,  0.0, 0.4472, 0.8944,  0.0, 0.4472, 0.8944,
-            // Sağ Yüz
             0.8944, 0.4472, 0.0,  0.8944, 0.4472, 0.0,  0.8944, 0.4472, 0.0,
-            // Arka Yüz
             0.0, 0.4472, -0.8944, 0.0, 0.4472, -0.8944, 0.0, 0.4472, -0.8944,
-            // Sol Yüz
             -0.8944, 0.4472, 0.0, -0.8944, 0.4472, 0.0, -0.8944, 0.4472, 0.0,
-            // Taban (Direkt aşağı bakar)
             0.0, -1.0, 0.0,       0.0, -1.0, 0.0,       0.0, -1.0, 0.0,
             0.0, -1.0, 0.0,       0.0, -1.0, 0.0,       0.0, -1.0, 0.0
         ]);

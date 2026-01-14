@@ -1,4 +1,4 @@
-// Sphere.js - USULÜNCE YAPILMIŞ KÜRE
+// Sphere.js 
 const mat4 = window.glMatrix.mat4;
 const vec3 = window.glMatrix.vec3;
 
@@ -17,7 +17,6 @@ export default class Sphere {
         this.modelMatrix = mat4.create();
         this.updateModelMatrix();
 
-        // Küre geometrisi biraz ağır olduğu için static olarak saklayalım
         if (!Sphere.VAO) {
             Sphere.initBuffers(gl);
         }
@@ -35,7 +34,6 @@ export default class Sphere {
     }
 
     checkIntersection(rayOrigin, rayDirection) {
-        // Küre için çarpışma testi en kolayıdır: Merkezine olan uzaklık yarıçaptan küçük mü?
         let oc = vec3.create();
         vec3.sub(oc, this.position, rayOrigin);
         let t = vec3.dot(oc, rayDirection);
@@ -46,7 +44,6 @@ export default class Sphere {
         vec3.add(closestPoint, closestPoint, rayOrigin);
         
         let distance = vec3.dist(this.position, closestPoint);
-        // Yarıçap ortalamasını alıyoruz
         let radius = Math.max(this.scale[0], this.scale[1]) * 1.0; 
         
         return distance < radius;
@@ -75,9 +72,8 @@ export default class Sphere {
     }
 
     static initBuffers(gl) {
-        // KÜRE OLUŞTURMA ALGORİTMASI (UV Sphere)
-        const latitudeBands = 30;  // Yatay dilim sayısı (Artarsa pürüzsüz olur)
-        const longitudeBands = 30; // Dikey dilim sayısı
+        const latitudeBands = 30; 
+        const longitudeBands = 30; 
         const radius = 1.0;
 
         const vertices = [];
@@ -97,7 +93,6 @@ export default class Sphere {
                 let x = cosPhi * sinTheta;
                 let y = cosTheta;
                 let z = sinPhi * sinTheta;
-                // Normal ile Pozisyon kürede aynı yöndedir (Merkezden dışarı)
                 let u = 1 - (longNumber / longitudeBands);
                 let v = 1 - (latNumber / latitudeBands);
 

@@ -7,16 +7,9 @@ export class Level {
     this.scene = scene;
     this.root = null;
 
-    // Static colliders (duvarlar vs): [{ box, name }]
     this.colliders = [];
-
-    // Dynamic colliders (kapı gibi hareket edenler): [{ mesh, box, name }]
     this.dynamicColliders = [];
-
-    // Doors: [{ mesh, isOpen, angle }]
     this.doors = [];
-
-    // constructor içinde:
     this.anchors = [];
 
   }
@@ -28,7 +21,6 @@ export class Level {
     // House scale
     this.root.scale.set(1.5, 1.5, 1.5);
 
-    // Gizlenecek yardımcı objeler: collision + boolean/controller
     this.root.traverse((o) => {
       const n = (o.name || "");
       if (
@@ -44,7 +36,6 @@ export class Level {
         this.scene.traverse((obj) => {
     if (!obj.isMesh) return;
 
-    // Spawn area ve helper meshler görünmez
     if (
       obj.name === "AREA_SPAWN" ||
       obj.name.startsWith("AREA_")
@@ -55,20 +46,18 @@ export class Level {
     }
     });
 
-    // Anchors cache (AI + names + spawn)
     this.anchors.length = 0;
     this.root.updateWorldMatrix(true, true);
 
     this.root.traverse((o) => {
       const n = (o.name || "");
-      // Blender EMPTY: isObject3D true, isMesh false olur genelde
       if (!n) return;
 
       if (
         n === "SPAWN" ||
         n === "EMPTY_NAMES" ||
-        n.startsWith("AI_SPAWN") ||      // AI_SPAWN.001 vs yakalar
-        n.startsWith("AI_PATROL") ||     // AI_PATROL_00.003 vs yakalar
+        n.startsWith("AI_SPAWN") ||     
+        n.startsWith("AI_PATROL") ||  
         n.startsWith("AI_GUARD")
       ) {
         this.anchors.push(o);
@@ -97,7 +86,7 @@ export class Level {
     this.doors.length = 0;
     if (!this.root) return;
   
-    const doorRootRe = /^Door_\d{3}$/; // sadece Door_000, Door_001 ...
+    const doorRootRe = /^Door_\d{3}$/;
   
     this.root.traverse((o) => {
       if (!o.isObject3D) return;
@@ -107,7 +96,7 @@ export class Level {
       this.doors.push({
         mesh: o,
         isOpen: false,
-        angle: o.rotation.z, // blenderda hangi eksenle açıyorsan onu kullan
+        angle: o.rotation.z, 
       });
     });
   
@@ -133,7 +122,6 @@ export class Level {
       const name = (obj.name || "");
       if (!name.startsWith("COL_")) return;
 
-      // Kapı collider'ları hareket eder -> dynamic
       if (name.startsWith("COL_DOOR")) {
         this.dynamicColliders.push({
           mesh: obj,
@@ -143,7 +131,6 @@ export class Level {
         return;
       }
 
-      // Diğerleri static
       const box = new THREE.Box3().setFromObject(obj);
       if (Number.isFinite(box.min.x)) {
         this.colliders.push({ box, name });
@@ -153,16 +140,13 @@ export class Level {
     console.log("Static colliders:", this.colliders.length, "Dynamic colliders:", this.dynamicColliders.length);
   }
 
-  // Kapı döndükten sonra dynamic collider box'larını güncelle
   updateDynamicColliders() {
     for (const c of this.dynamicColliders) {
       c.box.setFromObject(c.mesh);
     }
   }
 
-  // Game.js kolay kullansın diye tek listede veren helper
   getAllColliders() {
-    // dynamicColliders -> {box,...} formatına uydur
     return [
       ...this.colliders,
       ...this.dynamicColliders.map(dc => ({ box: dc.box, name: dc.name }))

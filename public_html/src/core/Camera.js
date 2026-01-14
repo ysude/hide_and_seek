@@ -1,8 +1,7 @@
-// Camera.js - GARANTİ ÇALIŞAN VERSİYON (FIXED)
+// Camera.js
 const mat4 = window.glMatrix.mat4;
 const vec3 = window.glMatrix.vec3;
 
-// Radyan çeviriciyi elle yazdık, kütüphane hatasını engeller
 function degToRad(degrees) {
     return degrees * Math.PI / 180;
 }
@@ -18,7 +17,7 @@ export default class Camera {
         this.yaw = yaw;
         this.pitch = pitch;
 
-        this.movementSpeed = 5.0; // Hız
+        this.movementSpeed = 5.0;
         this.mouseSensitivity = 0.1;
 
         this.updateCameraVectors();
@@ -82,7 +81,6 @@ export default class Camera {
 
     updateCameraVectors() {
         let newFront = vec3.create();
-        // degToRad fonksiyonunu kullanıyoruz, hata çıkmaz
         newFront[0] = Math.cos(degToRad(this.yaw)) * Math.cos(degToRad(this.pitch));
         newFront[1] = Math.sin(degToRad(this.pitch));
         newFront[2] = Math.sin(degToRad(this.yaw)) * Math.cos(degToRad(this.pitch));

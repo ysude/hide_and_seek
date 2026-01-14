@@ -23,9 +23,7 @@ export class Game {
     this.renderer.toneMappingExposure = 1.0;
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    // perf: high-dpi öldürür
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-    // istersen 1.0 yapıp uçurursun
 
 
     // ---------------------------
@@ -46,8 +44,8 @@ export class Game {
     this.waveInterval = 30.0;  // real seconds
     this.waveTimer = this.waveInterval;
 
-    this.spawnPerWave = 3;     // her wave'de kaç tane spawn (istersen wave ile arttıracağız)
-    this.maxCollectiblesAlive = 12; // sahnede aynı anda max (perf için)
+    this.spawnPerWave = 3;     
+    this.maxCollectiblesAlive = 12; 
 
 
     // ---------------------------
@@ -930,11 +928,9 @@ adjustFlashlightAxis(dir, isRotation) {
     obj.position.y = THREE.MathUtils.clamp(obj.position.y, -0.6, 0.3);
     obj.position.z = THREE.MathUtils.clamp(obj.position.z, -1.2, -0.05);
   } else {
-    //  ROTATION (Shift+J/K)
     //  ROTATION (Shift+J/K): camera-space axis
       const step = this.flashStepRot * dir;
 
-      // obj: flashPivot (kamera child’ı) daha iyi
       const q = new THREE.Quaternion();
 
       if (this.flashAxis === "x") {
@@ -1443,7 +1439,7 @@ adjustFlashlightAxis(dir, isRotation) {
       // quick vertical reject
       if (playerHead < b.min.y || playerFeet > b.max.y) continue;
 
-      // ceiling stop (only when moving up)
+      // ceiling stop 
       if (c.isCeiling && this.player.velocity.y > 0) {
         if (playerHead >= b.min.y - CEILING_EPS) {
           this.player.velocity.y = 0;
@@ -1546,7 +1542,7 @@ adjustFlashlightAxis(dir, isRotation) {
 
     this._ray.setFromCamera(this._centerNdc, this.camera);
 
-    // 1) Cards
+    // Cards
     const questHits = this._ray.intersectObjects(this.objects, false);
     if (questHits.length) {
       const hit = questHits[0].object;
@@ -1557,7 +1553,7 @@ adjustFlashlightAxis(dir, isRotation) {
       }
     }
 
-    // 2) Switches
+    // Switches
     if (this.switchRoots.length) {
       const switchHits = this._ray.intersectObjects(this.switchRoots, true);
       if (switchHits.length) {
@@ -1579,7 +1575,7 @@ adjustFlashlightAxis(dir, isRotation) {
       }
     }
 
-    // 3) Doors
+    // Doors
     const doorRoots = this.level.doors.map((d) => d.mesh);
     if (doorRoots.length) {
       const doorHits = this._ray.intersectObjects(doorRoots, true);
@@ -1678,7 +1674,7 @@ adjustFlashlightAxis(dir, isRotation) {
 
       if (this.interactState.type === "door") {
         const d = this.interactState.doorEntry;
-        const doorId = this.interactState.id; // ör: "Door_000"
+        const doorId = this.interactState.id; 
         if (!d) return;
 
         //  lock logic for front door
@@ -2202,9 +2198,6 @@ _approxHalfHeight(obj) {
       const dx = mp.x - pp.x;
       const dz = mp.z - pp.z;
       const distXZ = Math.sqrt(dx*dx + dz*dz);
-
-      // istersen Y farkını da kat:
-      // const dy = mp.y - pp.y; const dist = Math.sqrt(dx*dx+dy*dy+dz*dz);
 
       if (distXZ < this.catchRadius) {
         this.endGame("lose");

@@ -5,7 +5,6 @@ import { DRACOLoader } from "three/addons/loaders/DRACOLoader.js";
 export function makeGLTFLoader() {
   const loader = new GLTFLoader();
 
-  // Draco varsa çözer, yoksa da sorun olmaz.
   const draco = new DRACOLoader();
   draco.setDecoderPath("https://unpkg.com/three@0.160.0/examples/jsm/libs/draco/");
   loader.setDRACOLoader(draco);
