@@ -37,6 +37,19 @@ export class Game {
     this.camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.01, 500);
     this.camera.position.set(0, 2, 10);
 
+    // ---- GAME CLOCK (fake 1 hour in 30s) ----
+    this.TIME_SCALE = 120;     // 30s real => 3600s game
+    this.gameTimeSec = 0;
+
+    // ---- COLLECTIBLE SPAWN (WAVES) ----
+    this.wave = 1;
+    this.waveInterval = 30.0;  // real seconds
+    this.waveTimer = this.waveInterval;
+
+    this.spawnPerWave = 3;     // her wave'de kaç tane spawn (istersen wave ile arttıracağız)
+    this.maxCollectiblesAlive = 12; // sahnede aynı anda max (perf için)
+
+
     // ---------------------------
     // POST FX
     // ---------------------------
@@ -52,7 +65,14 @@ export class Game {
     // CONTROLS
     // ---------------------------
     this.controls = new PointerLockControls(this.camera, document.body);
-    document.body.addEventListener("click", () => this.controls.lock());
+    document.body.addEventListener("click", () => {
+      // ✅ names modundayken lock alma (yere düşme bugını keser)
+      if (this.gameStarted && !this.gameOver && !this.namesMode && !this.namesFly.active) {
+        this.controls.lock();
+      }
+    });
+
+
 
     // ---------------------------
     // UI refs
@@ -61,6 +81,16 @@ export class Game {
     this._interactTextEl = document.getElementById("interactText");
     this._modeToastEl = document.getElementById("modeToast");
     this._modeToastTimer = null;
+    this._startOverlayEl = document.getElementById("startOverlay");
+    this._startBtnEl = document.getElementById("startBtn");
+    this._gameOverOverlayEl = document.getElementById("gameOverOverlay");
+    this._gameOverTitleEl = document.getElementById("gameOverTitle");
+    this._gameOverMsgEl = document.getElementById("gameOverMsg");
+    this._restartBtnEl = document.getElementById("restartBtn");
+    // UI buttons must be bound once
+    this.bindUIButtons();
+
+
 
     // ---------------------------
     // INPUT
@@ -86,6 +116,23 @@ export class Game {
     this.inventoryCards = 0;
     this.totalCards = 3;
     this.objects = [];
+
+    // ---- GAME STATE ----
+    this.gameStarted = false;
+    this.gameOver = false;
+    this.gameResult = null; // "win" | "lose"
+
+    // ---- OBJECTS ----
+    this.objectsCollected = 0;
+    this.totalObjects = 6;
+
+    // ---- FRONT DOOR LOCK ----
+    this.frontDoorName = "Door_000";
+    this.frontDoorUnlocked = false;
+
+    // ---- CATCH ----
+    this.catchRadius = 0.9; // yakalama mesafesi (istersen 1.1)
+
 
     // ---------------------------
     // Interact
@@ -116,7 +163,7 @@ export class Game {
       savedPos: new THREE.Vector3(),
       savedQuat: new THREE.Quaternion(),
     };
-    this.namesTopDownHeight = 14.0;
+    this.namesTopDownHeight = 4.0;
     this.namesTopDownForward = 0.001;
 
     // ---------------------------
@@ -252,6 +299,7 @@ export class Game {
     // Light flicker / door events
     this.lightFlickerTimer = 0;
     this.lightFlickerInterval = 0;
+    this.autoCloseDoorCooldown = THREE.MathUtils.randFloat(10, 18);
 
     // ---------------------------
     // DEBUG COLLISION LOG
@@ -280,11 +328,143 @@ export class Game {
     this._tmpV3b = new THREE.Vector3();
     this._tmpQ1 = new THREE.Quaternion();
 
+    // Clock UI
+    this._clockEl = document.getElementById("clockText");
+
+    // Collectible perf caches
+    this._collectibleGeos = null;
+    this._collectibleMats = null;
+    this._spawnScratch = new THREE.Vector3();
+
 
     // start init
     this.lastTime = 0;
     this.init();
   }
+  
+  updateClockUI() {
+  if (!this._clockEl) return;
+
+  // gameTimeSec zaten dt * TIME_SCALE ile artıyor
+  const total = Math.floor(this.gameTimeSec);
+
+  const hh = Math.floor(total / 3600) % 24;
+  const mm = Math.floor((total % 3600) / 60);
+
+  this._clockEl.textContent =
+    `Time: ${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+}
+
+
+  randomPointInSpawnBox(out) {
+    out.set(
+      THREE.MathUtils.lerp(this.spawnBox.min.x, this.spawnBox.max.x, Math.random()),
+      this.spawnBox.max.y + 1.0,
+      THREE.MathUtils.lerp(this.spawnBox.min.z, this.spawnBox.max.z, Math.random())
+    );
+    return out;
+  }
+
+  // min-distance: aynı noktaya spawn olmasın
+  findSpawnPointMinDist(minDist = 0.45, tries = 20) {
+    const p = this._spawnScratch;
+    for (let k = 0; k < tries; k++) {
+      this.randomPointInSpawnBox(p);
+
+      let ok = true;
+      for (const o of this.activeCollectibles) {
+        if (!o || o.parent !== this.scene) continue;
+        const dx = o.position.x - p.x;
+        const dz = o.position.z - p.z;
+        if (dx * dx + dz * dz < minDist * minDist) { ok = false; break; }
+      }
+      if (ok) return p.clone();
+    }
+    // olmadıysa en son random
+    return this.randomPointInSpawnBox(new THREE.Vector3());
+  }
+
+  makeCollectible() {
+    // geometry cache
+    if (!this._collectibleGeos) {
+      this._collectibleGeos = [
+        new THREE.BoxGeometry(0.2, 0.2, 0.02),
+        new THREE.SphereGeometry(0.12, 16, 12),
+        new THREE.TetrahedronGeometry(0.15),
+      ];
+    }
+
+    const geo = this._collectibleGeos[Math.floor(Math.random() * this._collectibleGeos.length)];
+
+    // material cache (tek material üretip renk değiştiriyoruz)
+    if (!this._collectibleMats) {
+      this._collectibleMats = new THREE.MeshStandardMaterial({
+        color: 0xffffff,
+        roughness: 0.4,
+        metalness: 0.1,
+      });
+    }
+
+    const mat = this._collectibleMats.clone();
+    mat.color.setHSL(Math.random(), 0.8, 0.6);
+
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.name = "COLLECTIBLE";
+    mesh.userData.isCollectible = true;
+    mesh.userData.vy = 0;
+
+    return mesh;
+  }
+
+  spawnCollectiblesWave() {
+    if (!this.spawnArea) return;
+
+    const canSpawn = Math.max(0, this.maxCollectiblesAlive - this.activeCollectibles.length);
+    if (canSpawn <= 0) return;
+
+    const n = Math.min(this.spawnPerWave, canSpawn);
+
+    for (let i = 0; i < n; i++) {
+      const mesh = this.makeCollectible();
+
+      const p = this.findSpawnPointMinDist(0.45, 25);
+      mesh.position.copy(p);
+
+      mesh.userData.vy = 0;
+      mesh.userData._halfH = this._approxHalfHeight(mesh);
+
+      // ground sample
+      mesh.userData.groundY = this.sampleGroundY(mesh.position.x, mesh.position.z);
+      if (mesh.userData.groundY === -Infinity) {
+        // floor collider top yaklaşık -0.15
+        mesh.userData.groundY = -0.15;
+      }
+
+      this.scene.add(mesh);
+      this.activeCollectibles.push(mesh);
+    }
+  }
+
+  clearActiveCollectibles({ keepInspected = true } = {}) {
+  const keep = keepInspected ? this.inspectedObject : null;
+
+  // sahneden kaldır
+  for (const obj of this.activeCollectibles) {
+    if (!obj) continue;
+    if (keep && obj === keep) continue;
+
+    // parent neresi olursa olsun temizle
+    if (obj.parent) obj.parent.remove(obj);
+    this.scene.remove(obj);
+
+    // material clone’ladıysan dispose iyi olur (memory leak önler)
+    if (obj.material && obj.material.dispose) obj.material.dispose();
+    // geo cache kullandığın için geo dispose ETME (shared)
+  }
+
+  // listeleri resetle
+  this.activeCollectibles = keep ? [keep] : [];
+}
 
   // ============================================================
   // INIT
@@ -392,7 +572,98 @@ export class Game {
     // initial UI
     this.updateUI();
     this.hideInteractPrompt();
+    this.showStartOverlay();
+
   }
+
+  bindUIButtons() {
+    if (this._uiBound) return; // ✅ prevent double binding
+    this._uiBound = true;
+
+    if (this._startBtnEl) {
+      this._startBtnEl.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.startGame();
+      });
+    }
+
+    if (this._restartBtnEl) {
+      this._restartBtnEl.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        location.reload();
+      });
+    }
+  }
+
+
+showStartOverlay() {
+  // ✅ show start overlay
+  if (this._startOverlayEl) this._startOverlayEl.classList.add("isVisible");
+  if (this._gameOverOverlayEl) this._gameOverOverlayEl.classList.remove("isVisible");
+
+  this.gameStarted = false;
+  this.gameOver = false;
+  this.gameResult = null;
+
+  if (this.controls.isLocked) this.controls.unlock();
+}
+
+
+startGame() {
+  // ✅ hide overlays
+  if (this._startOverlayEl) this._startOverlayEl.classList.remove("isVisible");
+  if (this._gameOverOverlayEl) this._gameOverOverlayEl.classList.remove("isVisible");
+
+  // reset run state
+  this.gameStarted = true;
+  this.gameOver = false;
+  this.gameResult = null;
+
+  // progression
+  this.objectsCollected = 0;
+  this.totalObjects = 6;
+  this.frontDoorUnlocked = false;
+
+  // time + waves
+  this.gameTimeSec = 0;
+  this.wave = 1;
+  this.waveTimer = this.waveInterval;
+  this.spawnPerWave = 4;
+
+  // clear & respawn collectibles
+  this.clearActiveCollectibles({ keepInspected: false });
+  this.spawnCollectiblesWave();
+
+  // HUD
+  this.updateUI();
+  this.updateClockUI?.();
+
+  // ✅ pointer lock must be initiated by user gesture (this click)
+  this.controls.lock();
+}
+
+
+endGame(result) {
+  if (this.gameOver) return;
+  this.gameOver = true;
+  this.gameResult = result;
+
+  if (this.controls.isLocked) this.controls.unlock();
+  this.hideInteractPrompt();
+
+  if (this._gameOverOverlayEl) this._gameOverOverlayEl.classList.add("isVisible");
+
+  if (this._gameOverTitleEl) this._gameOverTitleEl.textContent =
+    (result === "win") ? "YOU WIN" : "YOU LOSE";
+
+  if (this._gameOverMsgEl) this._gameOverMsgEl.textContent =
+    (result === "win")
+      ? "You escaped through the front door."
+      : "The monster caught you.";
+}
+
   setupSpawnArea() {
   this.spawnArea = this.scene.getObjectByName("AREA_SPAWN");
   if (!this.spawnArea) {
@@ -622,6 +893,9 @@ sampleGroundY(x, z) {
       this.postPassB.enabled = !useA;
       this.postPassB.renderToScreen = !useA;
     }
+    const shaderEl = document.getElementById("shaderNow");
+    if (shaderEl) shaderEl.textContent = setId;
+
   }
 
   updatePostFXUniforms(t) {
@@ -926,9 +1200,15 @@ adjustFlashlightAxis(dir, isRotation) {
     this.inspectedObject = null;
 
     // skor
-    this.inventoryCount++;
-    this.inventoryCards++;
+    this.objectsCollected++;
     this.updateUI();
+
+    if (this.objectsCollected >= this.totalObjects) {
+      this.frontDoorUnlocked = true;
+      this.showModeToast("Front Door Unlocked!");
+    }
+
+
 
     console.log("Collected:", this.inventoryCount);
   }
@@ -952,14 +1232,12 @@ adjustFlashlightAxis(dir, isRotation) {
   }
 
   updateUI() {
-    const now = document.getElementById("cardsNow");
-    const total = document.getElementById("cardsTotal");
-    if (now) now.textContent = String(this.inventoryCards);
-    if (total) total.textContent = String(this.totalCards);
+  const now = document.getElementById("cardsNow");
+  const total = document.getElementById("cardsTotal");
+  if (now) now.textContent = String(this.objectsCollected);
+  if (total) total.textContent = String(this.totalObjects);
+}
 
-    const ui = document.getElementById("ui");
-    if (ui) ui.innerText = `Kartlar: ${this.inventoryCards} / ${this.totalCards}`;
-  }
 
   // ============================================================
   // QUEST
@@ -1005,6 +1283,8 @@ adjustFlashlightAxis(dir, isRotation) {
       this.namesFly.savedQuat.copy(this.camera.quaternion);
 
       const anchorWp = this.namesAnchor.getWorldPosition(new THREE.Vector3());
+      const LEVEL2_Y = 0.1; // <-- bunu ihtiyacına göre ayarla
+      anchorWp.y = LEVEL2_Y;  
       const targetPos = anchorWp.clone().add(new THREE.Vector3(0, this.namesTopDownHeight, 0));
 
       const lookAtTarget = anchorWp.clone().add(new THREE.Vector3(0, 0, this.namesTopDownForward));
@@ -1059,6 +1339,13 @@ adjustFlashlightAxis(dir, isRotation) {
 
       this.freeCam.enabled = true;
       this.showModeToast("FREE CAMERA: ON (6DOF)");
+      const fc = document.getElementById("freeCamStatus");
+      if (fc) {
+        fc.textContent = this.freeCam.enabled ? "ON" : "OFF";
+        fc.className = "status " + (this.freeCam.enabled ? "warn" : "");
+      }
+
+      
       return;
     }
 
@@ -1073,6 +1360,12 @@ adjustFlashlightAxis(dir, isRotation) {
     this.resetFreeCamRoll();
 
     this.showModeToast("FREE CAMERA: OFF");
+    const fc = document.getElementById("freeCamStatus");
+    if (fc) {
+      fc.textContent = this.freeCam.enabled ? "ON" : "OFF";
+      fc.className = "status " + (this.freeCam.enabled ? "warn" : "");
+    }
+
   }
 
   resetFreeCamRoll() {
@@ -1376,21 +1669,32 @@ adjustFlashlightAxis(dir, isRotation) {
 
     if (info.type === "switch") {
       const entry = this.boundLights[info.id];
-      const state = entry ? (entry.isOn ? "ON" : "OFF") : "UNBOUND";
+      const isOn = !!entry?.isOn;
+
       this.interactState = { ...this.interactState, ...info };
-      this.showInteractPrompt(`Toggle switch ${info.id} (${state})`);
+
+      // ✅ no id, no (ON/OFF), just action
+      this.showInteractPrompt(isOn ? "Turn Off the Light" : "Turn On the Light");
       return;
     }
 
     if (info.type === "door") {
-      const state = info.doorEntry?.isOpen ? "Close" : "Open";
       this.interactState = { ...this.interactState, ...info };
-      this.showInteractPrompt(`${state} ${info.id}`);
+
+      // ✅ front door locked message (no door name)
+      if (info.id === this.frontDoorName && !this.frontDoorUnlocked) {
+        this.showInteractPrompt("Door is locked (Collect 6 objects)");
+        return;
+      }
+
+      const isOpen = !!info.doorEntry?.isOpen;
+      this.showInteractPrompt(isOpen ? "Close Door" : "Open Door");
       return;
     }
 
     this.hideInteractPrompt();
   }
+
 
   tryInteract() {
     if (this.namesFly.active) return;
@@ -1415,10 +1719,26 @@ adjustFlashlightAxis(dir, isRotation) {
 
       if (this.interactState.type === "door") {
         const d = this.interactState.doorEntry;
-        if (d) d.isOpen = !d.isOpen;
+        const doorId = this.interactState.id; // ör: "Door_000"
+        if (!d) return;
+
+        // ✅ lock logic for front door
+        if (doorId === this.frontDoorName && !this.frontDoorUnlocked) {
+          this.showModeToast("Locked: Collect all 6 objects");
+          return;
+        }
+
+        // toggle
+        d.isOpen = !d.isOpen;
         this.playDoorSound();
+
+        // ✅ win: front door opened
+        if (doorId === this.frontDoorName && d.isOpen) {
+          this.endGame("win");
+        }
         return;
       }
+
     }
   }
 
@@ -1534,6 +1854,12 @@ adjustFlashlightAxis(dir, isRotation) {
 
     this.flashlightOn = !this.flashlightOn;
     this.flashlightLight.intensity = this.flashlightOn ? this.flashIntensityMax : 0.0;
+    const fl = document.getElementById("flashStatus");
+    if (fl) {
+      fl.textContent = this.flashlightOn ? "ON" : "OFF";
+      fl.className = "status " + (this.flashlightOn ? "good" : "bad");
+    }
+
   }
 
   // ============================================================
@@ -1692,7 +2018,7 @@ adjustFlashlightAxis(dir, isRotation) {
       vy = Math.max(vy - GRAV * dt, MAX_FALL);
       obj.position.y += vy * dt;
 
-      const groundY = obj.userData.groundY;
+      const groundY = (obj.userData.groundY ?? -Infinity);
       if (groundY !== -Infinity) {
         const halfH = obj.userData._halfH ?? this._approxHalfHeight(obj);
         const targetY = groundY + halfH + 0.002;
@@ -1790,6 +2116,12 @@ _approxHalfHeight(obj) {
     // horror systems run regardless (when locked is off, still ok)
     this.updateHorrorAmbience(dt);
     this.updateKnockTick(dt);
+    // start screen or game over: freeze gameplay
+    if (!this.gameStarted || this.gameOver) {
+      this.hideInteractPrompt();
+      return;
+    }
+
 
     // random scare one-shots (only while locked to avoid weirdness in menu)
     if (this.controls.isLocked && !this.namesFly.active) {
@@ -1812,6 +2144,35 @@ _approxHalfHeight(obj) {
       this.hideInteractPrompt();
       return;
     }
+
+    // ---- GAME CLOCK ----
+    this.gameTimeSec += dt * this.TIME_SCALE;
+    this.updateClockUI();
+
+    // ---- WAVES (every 30s real) ----
+    this.waveTimer -= dt;
+    if (this.waveTimer <= 0) {
+      this.waveTimer += this.waveInterval;
+      this.wave++;
+      const waveEl = document.getElementById("waveNow");
+      if (waveEl) waveEl.textContent = String(this.wave);
+
+      if (this.wave > 6) {
+        this.endGame("lose");
+        return;
+      }
+      
+
+      // wave büyüdükçe spawn artsın
+      this.spawnPerWave = 3 + Math.floor(this.wave / 2);
+
+      // ✅ eski wave collectible’larını kaldır
+      this.clearActiveCollectibles({ keepInspected: true });
+
+      // ✅ yeni wave spawn
+      this.spawnCollectiblesWave();
+    }
+
 
     // auto door + flicker events
     this.updateLightFlicker(dt);
@@ -1881,6 +2242,24 @@ _approxHalfHeight(obj) {
       }
     }
     if (this.monsterMixer) this.monsterMixer.update(dt);
+
+    // ✅ monster catch -> lose
+    if (this.gameStarted && !this.gameOver && this.monster) {
+      const mp = this.monster.getWorldPosition(new THREE.Vector3());
+      const pp = this.camera.position;
+
+      const dx = mp.x - pp.x;
+      const dz = mp.z - pp.z;
+      const distXZ = Math.sqrt(dx*dx + dz*dz);
+
+      // istersen Y farkını da kat:
+      // const dy = mp.y - pp.y; const dist = Math.sqrt(dx*dx+dy*dy+dz*dz);
+
+      if (distXZ < this.catchRadius) {
+        this.endGame("lose");
+      }
+    }
+
 
     // -----------------------------------------
     // rotate quest cards

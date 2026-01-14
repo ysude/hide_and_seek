@@ -31,21 +31,20 @@ export class SeekerAI {
     // collision capsule-ish radius (XZ)
     this.radius = 0.35;
     // ===== PARAMS =====
-    this.doorOpenDistance = 1.6;              // kapıya ne kadar yaklaşınca açsın (XZ)
-    this.doorOpenFov = THREE.MathUtils.degToRad(110); // kapının "önünde" olma toleransı
+    this.doorOpenDistance = 1.6;              
+    this.doorOpenFov = THREE.MathUtils.degToRad(110); 
 
 
     // LOS heights
-    this.eyeHeightAI = 1.55;     // monster eye height (scale 1.5 sonrası ayarla)
-    this.eyeHeightPlayer = 1.55; // player eye height (standing)
+    this.eyeHeightAI = 1.55;     
+    this.eyeHeightPlayer = 1.55; 
     this.eyeHeightPlayerCrouch = 1.05;
 
     // search behavior
     this.searchRadius = 5;
     this.searchPointCount = 10;
     this.searchTimeLimit = 4;
-    // Debug sektör sadece görsel olsun (görüşle aynı değil)
-    this.debugRange = 5.0;   // istediğin gibi 3-6 arası yap
+    this.debugRange = 5.0;
 
 
     // anti-stuck / ledge
@@ -55,9 +54,9 @@ export class SeekerAI {
     this._patrolTimer = 0;
     this._patrolTimeout = 5.0;
 
-    // vertical sanity (zıplayınca uçta kalma vs)
+    // vertical sanity
     this.groundY = null;
-    this.maxYStep = 0.35;   // tek framede kabul edeceği Y farkı
+    this.maxYStep = 0.35;   
     this.snapToGround = true;
 
     /* ===== STATE ===== */
@@ -79,13 +78,11 @@ export class SeekerAI {
     // collider meshes for LOS (COL_ only)
     this._colMeshes = null;
 
-    // “see player” edge trigger for shader switch
     this._seeing = false;
-    this._seeHold = 0;       // görmeyi 0.2 sn “tut” (flicker azaltır)
+    this._seeHold = 0;       
     this._seeHoldDur = 0.25;
-    this.stuckDoorDistance = 3.0;  // takılınca bu mesafede kapı ara
-    this._stuckDoorCooldown = 0;   // kapıya sapmayı spamlemesin
-
+    this.stuckDoorDistance = 3.0;  
+    this._stuckDoorCooldown = 0;   
 
     /* ===== DEBUG: ground sector (wedge) ===== */
     this.debugSector = this.createGroundSector();
@@ -111,7 +108,6 @@ export class SeekerAI {
       this.groundY = this.root.position.y;
     }
 
-    // Patrol point Y’lerini groundY’ye çek (zıplama/merdiven yoksa)
     for (const p of this.patrolPoints) p.y = this.groundY;
 
     console.log("[AI] patrolPoints:", this.patrolPoints.map(p => p.toArray().map(v=>v.toFixed(2)).join(",")));
